@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
 import html
+from uuid import UUID
 
 
 # ============================================================================
@@ -122,7 +123,7 @@ class ArticleDetailResponse(ArticleResponse):
 
 class SummaryRequest(BaseModel):
     """Article summary generation request"""
-    article_id: Optional[int] = None
+    article_id: Optional[UUID] = None
     url: Optional[HttpUrl] = None
     text: Optional[str] = Field(None, min_length=100, max_length=50000)
     max_length: int = Field(150, ge=50, le=500)
@@ -145,7 +146,7 @@ class SummaryRequest(BaseModel):
 
 class SummaryResponse(BaseModel):
     """Article summary response"""
-    article_id: Optional[int] = None
+    article_id: Optional[UUID] = None
     summary: str
     key_points: Optional[List[str]] = None
     word_count: int
@@ -217,4 +218,4 @@ class PersonalizedFeedResponse(BaseModel):
     page: int
     page_size: int
     user_preferences: Dict[str, float] = Field(default_factory=dict)
-    relevance_scores: Dict[int, float] = Field(default_factory=dict)
+    relevance_scores: Dict[str, float] = Field(default_factory=dict)

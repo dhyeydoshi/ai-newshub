@@ -1,4 +1,4 @@
-"""
+﻿"""
 RSA Key Pair Generator for JWT Authentication
 Generates private and public keys for RS256 algorithm
 """
@@ -17,7 +17,7 @@ def generate_rsa_keys():
     - public_key.pem: For verifying JWT tokens (can be shared)
     """
 
-    print("🔐 Generating RSA Key Pair...")
+    print(" Generating RSA Key Pair...")
     print("-" * 50)
 
     # Generate private key (4096 bits for production security)
@@ -47,18 +47,18 @@ def generate_rsa_keys():
     private_key_path = "private_key.pem"
     with open(private_key_path, "wb") as f:
         f.write(private_pem)
-    print(f"✅ Private key saved to: {private_key_path}")
+    print(f" Private key saved to: {private_key_path}")
 
     # Write public key to file
     public_key_path = "public_key.pem"
     with open(public_key_path, "wb") as f:
         f.write(public_pem)
-    print(f"✅ Public key saved to: {public_key_path}")
+    print(f" Public key saved to: {public_key_path}")
 
     print("-" * 50)
-    print("✅ Key generation complete!")
+    print(" Key generation complete!")
     print()
-    print("📋 Next Steps:")
+    print(" Next Steps:")
     print("1. Add these keys to your .env file:")
     print()
     print("   JWT_PRIVATE_KEY=")
@@ -71,12 +71,12 @@ def generate_rsa_keys():
     print(public_pem.decode('utf-8'))
     print('   """')
     print()
-    print("⚠️  IMPORTANT:")
+    print("  IMPORTANT:")
     print("   - Keep private_key.pem SECRET (add to .gitignore)")
     print("   - Never commit private_key.pem to version control")
     print("   - Public key can be shared safely")
     print()
-    print("🔒 Security Tips:")
+    print(" Security Tips:")
     print("   - Rotate keys periodically (every 6-12 months)")
     print("   - Use different keys for dev/staging/production")
     print("   - Store production keys in secure vault (e.g., AWS Secrets Manager)")
@@ -92,7 +92,7 @@ def generate_rsa_keys():
 def verify_keys():
     """Verify that generated keys can be loaded"""
     print()
-    print("🔍 Verifying generated keys...")
+    print(" Verifying generated keys...")
 
     try:
         # Load private key
@@ -102,7 +102,7 @@ def verify_keys():
                 password=None,
                 backend=default_backend()
             )
-        print("✅ Private key is valid")
+        print(" Private key is valid")
 
         # Load public key
         with open("public_key.pem", "rb") as f:
@@ -110,20 +110,20 @@ def verify_keys():
                 f.read(),
                 backend=default_backend()
             )
-        print("✅ Public key is valid")
+        print(" Public key is valid")
 
         # Verify key sizes
         private_size = private_key.key_size
         public_size = public_key.key_size
-        print(f"✅ Key size: {private_size} bits")
+        print(f" Key size: {private_size} bits")
 
         if private_size == public_size == 4096:
-            print("✅ All checks passed! Keys are ready to use.")
+            print(" All checks passed! Keys are ready to use.")
         else:
-            print("⚠️  Warning: Key size is not 4096 bits")
+            print("  Warning: Key size is not 4096 bits")
 
     except Exception as e:
-        print(f"❌ Verification failed: {e}")
+        print(f" Verification failed: {e}")
 
 
 if __name__ == "__main__":
@@ -136,10 +136,10 @@ if __name__ == "__main__":
 
     # Check if keys already exist
     if os.path.exists("private_key.pem") or os.path.exists("public_key.pem"):
-        print("⚠️  Warning: Key files already exist!")
+        print("  Warning: Key files already exist!")
         response = input("Do you want to overwrite them? (yes/no): ").lower()
         if response not in ["yes", "y"]:
-            print("❌ Aborted. Existing keys preserved.")
+            print(" Aborted. Existing keys preserved.")
             exit(0)
         print()
 
@@ -153,4 +153,5 @@ if __name__ == "__main__":
     print("=" * 50)
     print("  Generation Complete!")
     print("=" * 50)
+
 

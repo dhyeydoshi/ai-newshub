@@ -1,17 +1,17 @@
-# News Summarizer & Recommendation API
+﻿# News Summarizer & Recommendation API
 
 A comprehensive, production-ready FastAPI-based news aggregation, summarization, and personalized recommendation system with reinforcement learning capabilities.
 
-## 🚀 Features
+##  Features
 
 ### Core Capabilities
 - **News Aggregation**: Multi-source news collection (NewsAPI, GDELT, RSS feeds)
-- **AI-Powered Summarization**: LLM-based article summarization (OpenAI, Anthropic, Local)
+- **Summarization**: Extractive article summaries for quick reading
+- **Personalized Recommendations**: RL-based content recommendation engine
 - **User Management**: Complete authentication and authorization system
 - **Analytics Dashboard**: User behavior tracking and insights
 - **Background Processing**: Celery-based task queue for news fetching
 - **Auto-scheduling**: Fetch news every 2 hours automatically
-- **Database Connection Pooling**: Optimized for high performance
 
 ### Security Features
 - JWT-based authentication (RS256)
@@ -24,18 +24,18 @@ A comprehensive, production-ready FastAPI-based news aggregation, summarization,
 - Input sanitization and XSS prevention
 - Circuit breaker pattern for API resilience
 
-### Machine Learning & Optimization(Coming Soon)
-- **Personalized Recommendations**: RL-based content recommendation engine
+### Machine Learning & Optimization
 - **Reinforcement Learning**: Contextual bandit with epsilon-greedy exploration
 - **Online Learning**: Real-time model updates from user feedback
 - **Gym Environment**: Custom RL environment for advanced training
 - **MLflow Integration**: Experiment tracking and model registry
 - **Centralized Cache Manager**: Automatic compression, batch operations
 - **Database Connection Pooling**: Optimized for high performance
+- **Content Deduplication**: SHA-256 hashing + Jaccard similarity
 
 ---
 
-## 📋 Table of Contents
+##  Table of Contents
 
 1. [Architecture](#architecture)
 2. [Prerequisites](#prerequisites)
@@ -47,75 +47,40 @@ A comprehensive, production-ready FastAPI-based news aggregation, summarization,
 8. [Database Setup](#database-setup)
 9. [Rate Limiting](#rate-limiting)
 10. [News Aggregation](#news-aggregation)
-11. [LLM Integration](#llm-integration)
-12. [RL Service](#rl-service)
-13. [Frontend Application](#frontend-application)
-14. [Testing](#testing)
-15. [Deployment](#deployment)
-16. [Troubleshooting](#troubleshooting)
+11. [RL Service](#rl-service)
+12. [Frontend Application](#frontend-application)
+13. [Testing](#testing)
+14. [Deployment](#deployment)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Client Applications                     │
-│              (Web, Mobile, Third-party APIs)                │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      API Gateway Layer                      │
-│                  (FastAPI + Middleware)                     │
-├─────────────────────────────────────────────────────────────┤
-│  • CORS • Rate Limiting • Authentication • Validation       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-        ▼            ▼            ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   Auth API   │ │   News API   │ │   User API   │
-└──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-       │                │                │
-       └────────────────┼────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-        ▼               ▼               ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   Database   │ │ Redis Cache  │ │  RL Service  │
-│ (PostgreSQL) │ │ (Rate Limit) │ │   (Bandit)   │
-└──────────────┘ └──────────────┘ └──────────────┘
-        │
-        ▼
-┌──────────────────────────────────────────┐
-│         External Services                │
-├──────────────────────────────────────────┤
-│ • NewsAPI • GDELT • OpenAI • Anthropic  │
-└──────────────────────────────────────────┘
-```
+High-level flow:
+1. Client applications (web, mobile, third-party)
+2. API gateway layer (FastAPI + middleware: CORS, auth, rate limiting, validation)
+3. Service APIs (Auth, News, User)
+4. Data layer (PostgreSQL, Redis cache, RL service)
+5. External services (NewsAPI, GDELT, RSS)
 
 ---
 
-## 🔧 Prerequisites
+##  Prerequisites
 
 ### Required Software
-- **Python**: 3.12 or higher (tested on 3.12)
-- **PostgreSQL**: 13 or higher
+- **Python**: 3.8 or higher (tested on 3.11+)
+- **PostgreSQL**: 12 or higher
 - **Redis**: 6.0 or higher
 - **Docker** (optional): For containerized deployment
 - **Git**: For version control
 
 ### API Keys (Optional but Recommended)
 - **NewsAPI**: https://newsapi.org/ (free tier available)
-- **OpenAI**: https://platform.openai.com/
-- **Anthropic**: https://www.anthropic.com/
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 The fastest way to get started (5 minutes):
 
@@ -149,11 +114,11 @@ alembic upgrade head
 python main.py
 ```
 
-Access the API at: http://localhost:8000/
+Access the API at: http://localhost:8000/docs
 
 ---
 
-## 📦 Installation
+##  Installation
 
 ### 1. Clone Repository
 
@@ -193,7 +158,7 @@ This creates:
 
 ---
 
-## ⚙️ Configuration
+##  Configuration
 
 ### 1. Create Environment File
 
@@ -214,7 +179,7 @@ DEBUG=true
 DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/news_summarizer
 
 # Redis
-REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://redis:6379/0
 REDIS_MAX_CONNECTIONS=50
 REDIS_CACHE_TTL=900
 
@@ -236,13 +201,6 @@ NEWSAPI_KEY=your_newsapi_key_here
 ENABLE_NEWS_SCHEDULER=true
 NEWS_FETCH_INTERVAL_HOURS=2
 
-##Coming Soon##
-# LLM Services (choose one)
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_openai_key_here
-# ANTHROPIC_API_KEY=your_anthropic_key_here
-# LOCAL_LLM_URL=http://localhost:11434
-
 # Email (optional)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -253,7 +211,7 @@ EMAIL_VERIFICATION_REQUIRED=false
 
 ---
 
-## 🚀 Running the Application
+##  Running the Application
 
 ### Development Mode
 
@@ -286,6 +244,11 @@ alembic history
 # Method 1: Direct Python
 python main.py
 
+# Method 2: Uvicorn with hot reload
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Method 3: Using batch file (Windows)
+run.bat
 ```
 
 #### 4. Start Celery Worker (for background news fetching)
@@ -302,6 +265,7 @@ chmod +x start_celery.sh
 #### 5. Access API
 
 - **API Documentation**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 - **Health Check**: http://localhost:8000/health
 
 ### Production Mode
@@ -320,7 +284,7 @@ docker-compose up -d
 
 ---
 
-## 📚 API Documentation
+##  API Documentation
 
 ### Authentication Endpoints
 
@@ -345,16 +309,7 @@ docker-compose up -d
 | GET | `/api/v1/news/scheduler/status` | Get scheduler status |
 | GET | `/api/v1/articles/{article_id}` | Get article details |
 
-### LLM & Summarization Endpoints(Coming Soon)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/llm/summarize` | Summarize text with LLM |
-| POST | `/api/v1/llm/chat` | Chat with LLM |
-| GET | `/api/v1/llm/usage/{user_id}` | Get LLM usage statistics |
-| DELETE | `/api/v1/llm/cache` | Clear LLM cache |
-
-### Recommendation Endpoints(Coming Soon)
+### Recommendation Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -393,7 +348,7 @@ curl -X GET http://localhost:8000/api/v1/recommendations \
 
 ---
 
-## 🗄️ Database Setup
+##  Database Setup
 
 ### Schema Overview
 
@@ -436,7 +391,7 @@ The following indexes are created for optimal performance:
 
 ---
 
-## 🚦 Rate Limiting
+##  Rate Limiting
 
 ### How to Use Rate Limiting
 
@@ -482,15 +437,15 @@ async def health(_: None = Depends(RateLimitPresets.lenient)):
 
 ### Rate Limit Features
 
-- **Per-user limits**: Tracks by JWT token
+- **Per-user limits**: Tracks by JWT token or IP
 - **Exponential backoff**: Penalties for violations
 - **Automatic ban**: Temporary bans after 5 violations
-- **Dynamic limits**: Reduces from 100 → 50 → 25 → 12
+- **Dynamic limits**: Reduces from 100  50  25  12
 - **Rate limit headers**: X-RateLimit-* headers in responses
 
 ---
 
-## 📰 News Aggregation
+##  News Aggregation
 
 ### Features
 
@@ -499,7 +454,7 @@ async def health(_: None = Depends(RateLimitPresets.lenient)):
 - **Circuit breaker**: Prevents cascading failures
 - **Content deduplication**: SHA-256 + Jaccard similarity (80% threshold)
 - **XSS prevention**: HTML sanitization
-- **Redis caching**: 1-hour TTL
+- **Redis caching**: 15-minute TTL
 - **Database persistence**: Permanent storage
 
 ### Supported Sources
@@ -529,29 +484,54 @@ RSS_FEED_URLS=https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
 
 ---
 
-## 🤖 LLM Integration(Coming Soon)
+##  RL Service
 
-### Supported Providers
+### Overview
 
-1. **OpenAI** - GPT-OSS
-2. **Anthropic** - Claude-4
-3. **Local LLM** - Ollama, LM Studio
+The RL service provides personalized news recommendations using a **contextual bandit** approach:
 
-### Features
+- **Epsilon-greedy exploration** (default: 10%)
+- **Online learning** from user feedback
+- **Multi-signal rewards** (clicks, time spent, feedback, diversity)
+- **No pre-training required** - learns incrementally
 
-- **Automatic fallback**: OpenAI → Anthropic → Local
-- **Token counting**: tiktoken for accurate billing
-- **Cost tracking**: Per-user usage statistics
-- **Response caching**: Redis-based, 1-hour TTL
-- **Retry logic**: Exponential backoff (3 attempts)
-- **Rate limiting**: 10/min, 100/hour, 1000/day
-- **Security**: Prompt injection detection, input sanitization
+### Configuration
 
+```python
+# In config.py or .env
+RL_EPSILON=0.1           # 10% exploration
+RL_LEARNING_RATE=0.01    # Slow, stable learning
+```
+
+### Advanced: MLOps Pipeline
+
+For production ML workflows:
+
+```bash
+# Train model with PPO
+python scripts/train_rl_model.py \
+    --config configs/training_config.json \
+    --output models/trained
+
+# Evaluate model
+python scripts/evaluate_model.py \
+    --model-path models/trained/final_model \
+    --n-episodes 100
+
+# Deploy with gradual rollout
+python scripts/gradual_rollout.py \
+    --version v1.0.0 \
+    --traffic-pct 10
+```
+
+**MLOps Stack:**
+- **MLflow**: Experiment tracking
+- **Prometheus**: Metrics collection
+- **Grafana**: Monitoring dashboards
 
 ---
 
-
-## 🎨 Frontend Application
+##  Frontend Application
 
 A Streamlit-based web interface is available in the `frontend/` directory.
 
@@ -576,7 +556,7 @@ Access at: http://localhost:8501
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ### Run Unit Tests
 
@@ -603,13 +583,15 @@ python test_rl_service.py
 # News aggregator
 python test_news_service.py
 
-# LLM service
-python test_llm_service.py
 ```
+
+### Manual Testing
+
+Use the Swagger UI at http://localhost:8000/docs for interactive testing.
 
 ---
 
-## 🚢 Deployment
+##  Deployment
 
 ### Docker Deployment (Recommended)
 
@@ -672,73 +654,62 @@ RATE_LIMIT_PER_MINUTE=60    # Strict
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 News/
-├── app/
-│   ├── api/                    # API endpoints
-│   │   ├── auth.py            # Authentication
-│   │   ├── news.py            # News aggregation
-│   │   ├── llm.py             # LLM integration
-│   │   ├── recommendations.py # Recommendations
-│   │   ├── rl_serving.py      # RL model serving
-│   │   └── ...
-│   │
-│   ├── core/                   # Core utilities
-│   │   ├── database.py        # Database connection
-│   │   ├── cache.py           # Centralized cache manager
-│   │   ├── jwt.py             # JWT management
-│   │   ├── security.py        # Security utilities
-│   │   └── ...
-│   │
-│   ├── middleware/             # Custom middleware
-│   │   ├── authentication.py  # JWT validation
-│   │   ├── cors.py            # CORS handling
-│   │   ├── security_headers.py # Security headers
-│   │   └── request_validation.py
-│   │
-│   ├── dependencies/           # FastAPI dependencies
-│   │   └── rate_limit.py      # Rate limiting (dependency injection)
-│   │
-│   ├── models/                 # Database models
-│   │   ├── user.py
-│   │   ├── article.py
-│   │   └── feedback.py
-│   │
-│   ├── schemas/                # Pydantic schemas
-│   │
-│   ├── services/               # Business logic
-│   │   ├── auth_service.py    # Authentication
-│   │   ├── news_aggregator.py # News collection
-│   │   ├── llm_service.py     # LLM integration
-│   │   ├── rl_service.py      # RL recommendations
-│   │   ├── rl_training.py     # RL training pipeline
-│   │   └── ...
-│   │
-│   ├── tasks/                  # Celery tasks
-│   │   └── news_tasks.py      # Background news fetching
-│   │
-│   └── utils/                  # Utility functions
-│       ├── date_parser.py     # Date parsing
-│       ├── pagination.py      # Pagination helpers
-│       └── benchmark.py       # Performance testing
-│
-├── alembic/                    # Database migrations
-├── frontend/                   # Streamlit frontend
-├── scripts/                    # Utility scripts
-├── tests/                      # Test files
-├── monitoring/                 # Prometheus & Grafana configs
-├── config.py                   # Configuration management
-├── main.py                     # Application entry point
-├── docker-compose.yml          # Multi-container setup
-├── Dockerfile                  # Production container
-└── README.md                   # This file
+- app/
+  - api/
+    - auth.py
+    - news.py
+    - recommendations.py
+    - rl_serving.py
+    - ...
+  - core/
+    - database.py
+    - cache.py
+    - jwt.py
+    - security.py
+    - ...
+  - middleware/
+    - authentication.py
+    - cors.py
+    - security_headers.py
+    - request_validation.py
+  - dependencies/
+    - rate_limit.py
+  - models/
+    - user.py
+    - article.py
+    - feedback.py
+  - schemas/
+  - services/
+    - auth_service.py
+    - news_aggregator.py
+    - rl_service.py
+    - rl_training.py
+    - ...
+  - tasks/
+    - news_tasks.py
+  - utils/
+    - date_parser.py
+    - pagination.py
+    - benchmark.py
+- alembic/
+- frontend/
+- scripts/
+- tests/
+- monitoring/
+- config.py
+- main.py
+- docker-compose.yml
+- Dockerfile
+- README.md
 ```
 
 ---
 
-## 🔧 Troubleshooting
+##  Troubleshooting
 
 ### Common Issues
 
@@ -814,29 +785,29 @@ alembic upgrade head
 
 ---
 
-## 📈 Performance Optimization
+##  Performance Optimization
 
 ### Database
-- ✅ Connection pooling configured (pool_size: 20, max_overflow: 30)
-- ✅ Performance indexes on frequently queried columns
-- ✅ Batch operations for bulk inserts
-- ✅ Query monitoring available (`app/utils/db_monitoring.py`)
+-  Connection pooling configured (pool_size: 20, max_overflow: 30)
+-  Performance indexes on frequently queried columns
+-  Batch operations for bulk inserts
+-  Query monitoring available (`app/utils/db_monitoring.py`)
 
 ### Caching
-- ✅ Centralized cache manager with compression
-- ✅ Automatic compression for payloads > 1KB (70-80% memory reduction)
-- ✅ Batch operations (5-10x faster)
-- ✅ Pattern-based invalidation
+-  Centralized cache manager with compression
+-  Automatic compression for payloads > 1KB (70-80% memory reduction)
+-  Batch operations (5-10x faster)
+-  Pattern-based invalidation
 
 ### API
-- ✅ Async operations throughout
-- ✅ Response caching for expensive operations
-- ✅ Circuit breaker pattern for external APIs
-- ✅ Request timeout protection
+-  Async operations throughout
+-  Response caching for expensive operations
+-  Circuit breaker pattern for external APIs
+-  Request timeout protection
 
 ---
 
-## 🔐 Security Best Practices
+##  Security Best Practices
 
 1. **Never commit secrets** - Use `.env` file (gitignored)
 2. **Rotate JWT keys** - Regenerate periodically in production
@@ -851,7 +822,7 @@ alembic upgrade head
 
 ---
 
-## 📊 Monitoring & Metrics
+##  Monitoring & Metrics
 
 ### Health Endpoints
 
@@ -859,16 +830,26 @@ alembic upgrade head
 - `/api/v1/status` - Detailed service status
 - `/api/v1/news/scheduler/status` - Celery scheduler status
 
+### Prometheus Metrics (Optional)
+
+Start monitoring stack:
+```bash
+docker-compose --profile with-monitoring up -d
+```
+
+Access:
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000 (admin/admin)
 
 ---
 
-## 📄 License
+##  License
 
-
+[Your License Here]
 
 ---
 
-## 👥 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/AmazingFeature`)
@@ -878,17 +859,18 @@ alembic upgrade head
 
 ---
 
-## Acknowledgments
+##  Acknowledgments
 
 - FastAPI framework for modern API development
-- OpenAI & Anthropic for LLM APIs
 - NewsAPI and GDELT for news data
 - Stable-Baselines3 for RL utilities
 - PostgreSQL, Redis, and Celery teams
 
 ---
 
-**Built with ❤️ using FastAPI, PostgreSQL, Redis, Reinforcement Learning and Streamlit**
+**Built with  using FastAPI, PostgreSQL, Redis, and Reinforcement Learning**
 
-**Version:** 1.0.0
+**Version:** 1.0.0 | **Last Updated:** October 23, 2025
+
+
 

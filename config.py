@@ -1,4 +1,4 @@
-"""
+﻿"""
 Configuration Management Module
 Complete settings for security middleware
 """
@@ -104,6 +104,18 @@ class Settings(BaseSettings):
         description="access token expiration time in hours"
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    MAX_LOGIN_ATTEMPTS: int = Field(
+        default=5,
+        description="Maximum failed login attempts before account lockout"
+    )
+    ACCOUNT_LOCKOUT_DURATION_MINUTES: int = Field(
+        default=30,
+        description="Lockout duration after too many failed login attempts"
+    )
+    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = Field(
+        default=1,
+        description="Password reset token expiration time in hours"
+    )
 
     # Password hashing
     BCRYPT_ROUNDS: int = 12
@@ -146,7 +158,7 @@ class Settings(BaseSettings):
             if private_key_path.exists():
                 try:
                     self.JWT_PRIVATE_KEY = private_key_path.read_text()
-                    print(f"✓ Loaded JWT private key from {private_key_path}")
+                    print(f"Loaded JWT private key from {private_key_path}")
                 except Exception as e:
                     warnings.warn(
                         f"Failed to load private key from {private_key_path}: {e}. "
@@ -171,7 +183,7 @@ class Settings(BaseSettings):
             if public_key_path.exists():
                 try:
                     self.JWT_PUBLIC_KEY = public_key_path.read_text()
-                    print(f"✓ Loaded JWT public key from {public_key_path}")
+                    print(f"Loaded JWT public key from {public_key_path}")
                 except Exception as e:
                     warnings.warn(
                         f"Failed to load public key from {public_key_path}: {e}",
@@ -319,27 +331,6 @@ class Settings(BaseSettings):
         if not self.NEWS_API_KEY and self.NEWSAPI_KEY:
             self.NEWS_API_KEY = self.NEWSAPI_KEY
         return self
-
-    # ========================================================================
-    # LLM SERVICE CONFIGURATION
-    # ========================================================================
-    OPENAI_API_KEY: Optional[str] = Field(
-        default=None,
-        description="OpenAI API key for GPT models"
-    )
-    OPENAI_MODEL: str = "gpt-4-turbo-preview"
-    OPENAI_MAX_TOKENS: int = 500
-    OPENAI_TEMPERATURE: float = 0.3
-
-    ANTHROPIC_API_KEY: Optional[str] = Field(
-        default=None,
-        description="Anthropic API key for Claude models"
-    )
-    ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
-
-    LOCAL_LLM_URL: str = "http://localhost:11434"
-
-    LLM_PROVIDER: str = Field(default="openai", pattern="^(openai|anthropic|local)$")
 
     # ========================================================================
     # RATE LIMITING CONFIGURATION
@@ -524,9 +515,6 @@ class Settings(BaseSettings):
                 issues.append("SECRET_KEY too short for production")
             if not self.NEWSAPI_KEY:
                 issues.append("NEWSAPI_KEY not set - news aggregation will be limited")
-            if not self.OPENAI_API_KEY and not self.ANTHROPIC_API_KEY:
-                issues.append("No LLM API keys configured - summarization will not work")
-
         return issues
 
 
@@ -540,7 +528,7 @@ def get_settings() -> Settings:
     settings = Settings()
     issues = settings.validate_configuration()
     if issues:
-        print("\n⚠️  Configuration Issues Found:")
+        print("\n  Configuration Issues Found:")
         for issue in issues:
             print(f"  - {issue}")
         print()
@@ -549,3 +537,5 @@ def get_settings() -> Settings:
 
 # Export settings instance
 settings = get_settings()
+
+

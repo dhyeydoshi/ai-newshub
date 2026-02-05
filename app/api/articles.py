@@ -1,4 +1,4 @@
-"""
+﻿"""
 Articles API Router
 Complete article and news endpoints with personalization and security
 """
@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc
 from datetime import datetime, timezone, timedelta
-import html
 from config import settings
 
 from app.core.database import get_db
@@ -23,6 +22,12 @@ from app.schemas.article import (
     PersonalizedFeedResponse
 )
 from app.api.auth import get_current_user_id
+from app.dependencies.cache import (
+    get_cached_response,
+    set_cached_response,
+    CacheConfig,
+    build_article_list_key
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,7 +36,7 @@ router = APIRouter(prefix="/news", tags=["News & Articles"])
 
 
 # ============================================================================
-# ARTICLE LISTING FROM DATABASE
+# ARTICLE LISTING FROM DATABASE WITH CACHING
 # ============================================================================
 
 @router.get("/articles", response_model=ArticleListResponse)
@@ -47,11 +52,29 @@ async def get_articles(
     Get articles from database (cached and fetched by scheduler)
 
     Features:
+    - Redis caching (2 hours TTL)
     - Pagination support
     - Filter by category, topics, language
     - Returns approved articles only
     - Sorted by published date
     """
+    # Build cache key
+    cache_key = build_article_list_key(
+        page=page,
+        page_size=page_size,
+        category=category,
+        topics=topics,
+        language=language
+    )
+
+    # Check cache first
+    cached_response = await get_cached_response(cache_key)
+    if cached_response:
+        logger.info(f" Cache HIT for articles list (page {page})")
+        return ArticleListResponse(**cached_response)
+
+    logger.info(f" Cache MISS for articles list (page {page}) - Querying database")
+
     from app.services.article_persistence import article_persistence_service
 
     # Get articles from database
@@ -101,8 +124,7 @@ async def get_articles(
             logger.error(f"Validation error for article {getattr(article, 'article_id', 'unknown')}: {e}")
             continue
 
-
-    return ArticleListResponse(
+    response = ArticleListResponse(
         total=total,
         page=page,
         page_size=page_size,
@@ -110,6 +132,11 @@ async def get_articles(
         has_next=(page * page_size) < total,
         has_previous=page > 1
     )
+
+    # Cache the response
+    await set_cached_response(cache_key, response.model_dump(), CacheConfig.ARTICLES_LIST_TTL)
+
+    return response
 
 
 # ============================================================================
@@ -206,7 +233,7 @@ async def get_scheduler_status():
 
         # Get last fetch time from Redis
         try:
-            redis_client = await aioredis.from_url(
+            redis_client = aioredis.from_url(
                 settings.REDIS_URL,
                 encoding="utf-8",
                 decode_responses=True
@@ -280,36 +307,17 @@ async def get_personalized_news(
     - Rate limited per user
     - Input validation
     """
-    # Get user from User model (with integer ID)
-    from app.models.user import User as AuthUser
-    auth_result = await db.execute(
-        select(AuthUser).where(AuthUser.user_id == user_id)
-    )
-    auth_user = auth_result.scalar_one_or_none()
-
-    if not auth_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    # Get corresponding User model entry
+    # Get user
     user_result = await db.execute(
-        select(User).where(User.email == auth_user.email)
+        select(User).where(User.user_id == user_id)
     )
     user = user_result.scalar_one_or_none()
 
     if not user:
-        # Create user entry if doesn't exist
-        user = User(
-            email=auth_user.email,
-            username=auth_user.username,
-            password_hash="",
-            is_active=True
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
         )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
 
     # Build query for active articles
     query = select(Article).where(Article.is_active == True)
@@ -330,30 +338,63 @@ async def get_personalized_news(
     result = await db.execute(query.order_by(desc(Article.published_date)).limit(100))
     articles = result.scalars().all()
 
-    # Simple scoring based on user preferences
-    user_preferences = user.topic_preferences or {}
-    favorite_topics = user.favorite_topics or []
-    relevance_scores = {}
+    if not articles:
+        return PersonalizedFeedResponse(
+            articles=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            user_preferences=user.topic_preferences or {},
+            relevance_scores={}
+        )
 
-    scored_articles = []
-    for article in articles:
-        score = 0.0
-        article_topics = article.topics or []
+    # RL-based scoring (core personalization)
+    from app.services.rl_service import rl_service
 
-        for topic in article_topics:
-            if topic in favorite_topics:
-                score += 1.0
-            elif topic in user_preferences:
-                score += user_preferences[topic]
+    try:
+        article_map = {str(article.article_id): article for article in articles}
+        recommendations = await rl_service.get_recommendations(
+            user_id=str(user.user_id),
+            candidate_articles=[article.to_dict() for article in articles],
+            top_k=len(articles)
+        )
 
-        if article_topics:
-            score = score / len(article_topics)
+        scored_articles = []
+        relevance_scores = {}
+        for rec in recommendations:
+            score = rec.get("score", 0.0)
+            if score < min_relevance_score:
+                continue
+            article_id = rec.get("article_id")
+            article = article_map.get(article_id)
+            if article:
+                scored_articles.append((article, score))
+                relevance_scores[str(article.article_id)] = score
+    except Exception as e:
+        logger.error(f"RL personalization error: {e}")
+        # Fallback: simple scoring based on user preferences
+        user_preferences = user.topic_preferences or {}
+        favorite_topics = user.favorite_topics or []
+        relevance_scores = {}
+        scored_articles = []
+        for article in articles:
+            score = 0.0
+            article_topics = article.topics or []
 
-        if score >= min_relevance_score:
-            scored_articles.append((article, score))
-            relevance_scores[article.article_id] = score
+            for topic in article_topics:
+                if topic in favorite_topics:
+                    score += 1.0
+                elif topic in user_preferences:
+                    score += user_preferences[topic]
 
-    # Sort by score
+            if article_topics:
+                score = score / len(article_topics)
+
+            if score >= min_relevance_score:
+                scored_articles.append((article, score))
+                relevance_scores[str(article.article_id)] = score
+
+    # Sort by score (if RL didn't already)
     scored_articles.sort(key=lambda x: x[1], reverse=True)
 
     # Pagination
@@ -375,7 +416,7 @@ async def get_personalized_news(
         page_size=page_size,
         user_preferences=user.topic_preferences or {},
         relevance_scores={
-            article.id: relevance_scores.get(article.id, 0.0)
+            str(article.article_id): relevance_scores.get(str(article.article_id), 0.0)
             for article in paginated
         }
     )
@@ -401,7 +442,6 @@ async def get_article_detail(
     - Engagement metrics
     """
     from uuid import UUID
-    from sqlalchemy.dialects.postgresql import ARRAY
 
     try:
         uuid_article_id = UUID(article_id)
@@ -478,19 +518,29 @@ async def get_article_detail(
 
 @router.get("/summary/{article_id}")
 async def get_article_summary(
-    article_id: int,
+    article_id: str,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get article summary (generated or cached)
 
-    Uses LLM service to generate summaries on-demand
+    Generates a simple extractive summary on-demand
     """
+    from uuid import UUID
+
+    try:
+        uuid_article_id = UUID(article_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid article ID format"
+        )
+
     # Get article
     result = await db.execute(
         select(Article).where(and_(
-            Article.article_id == article_id,
+            Article.article_id == uuid_article_id,
             Article.is_active == True
         ))
     )
@@ -511,31 +561,7 @@ async def get_article_summary(
             "cached": True
         }
 
-    # Generate simple summary (fallback if LLM unavailable)
-    try:
-        from app.services.llm_service import llm_service
-        if hasattr(llm_service, 'generate_summary'):
-            summary_result = await llm_service.generate_summary(
-                text=article.content,
-                max_length=150,
-                style="balanced"
-            )
-
-            # Cache summary
-            article.excerpt = summary_result.get('excerpt', '')
-            await db.commit()
-
-            return {
-                "article_id": article.article_id,
-                "excerpt": article.excerpt,
-                "word_count": len(article.excerpt.split()),
-                "cached": False,
-                "model_used": summary_result.get('model', 'unknown')
-            }
-    except Exception as e:
-        logger.warning(f"LLM service unavailable: {e}")
-
-    # Fallback: simple extraction of first few sentences
+    # Simple extraction of first few sentences
     sentences = article.content.split('.')[:3]
     simple_summary = '. '.join(s.strip() for s in sentences if s.strip()) + '.'
 
@@ -652,7 +678,7 @@ async def search_articles(
     if topics:
         safe_topics = [t.strip()[:50] for t in topics if t.strip()]
         if safe_topics:
-            search_query = search_query.where(Article.topics.overlap(safe_topics))
+            search_query = search_query.where(Article.topics.op('&&')(safe_topics))
 
     # Source filter
     if sources:
@@ -711,3 +737,4 @@ async def search_articles(
         suggestions=suggestions,
         facets=facets
     )
+

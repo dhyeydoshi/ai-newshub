@@ -117,7 +117,7 @@ class UserEngagementStats(BaseModel):
 
 class ReadingHistoryItem(BaseModel):
     """Reading history item"""
-    article_id: int
+    article_id: UUID
     article_title: str
     article_url: str
     topics: List[str]

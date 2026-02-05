@@ -1,32 +1,27 @@
-"""
-Authentication Utilities
+﻿"""Authentication Utilities
 Handles authentication state and token management
 """
-import streamlit as st
 from typing import Optional
+import streamlit as st
 from services.api_service import api_service
 
 
-def init_auth_state():
+def init_auth_state() -> None:
     """Initialize authentication state"""
     if "is_authenticated" not in st.session_state:
         st.session_state.is_authenticated = False
-        st.session_state.is_authenticated = False
         st.session_state.access_token = None
+        st.session_state.refresh_token = None
         st.session_state.user_id = None
         st.session_state.username = None
 
         # Attempt auto-login on first load
-        from services.api_service import api_service
         api_service.auto_login()
-    if "access_token" not in st.session_state:
-        st.session_state.access_token = None
-    if "refresh_token" not in st.session_state:
-        st.session_state.refresh_token = None
-    if "user_id" not in st.session_state:
-        st.session_state.user_id = None
-    if "username" not in st.session_state:
-        st.session_state.username = None
+
+    st.session_state.setdefault("access_token", None)
+    st.session_state.setdefault("refresh_token", None)
+    st.session_state.setdefault("user_id", None)
+    st.session_state.setdefault("username", None)
 
 
 def is_authenticated() -> bool:
@@ -39,7 +34,7 @@ def get_current_user() -> Optional[dict]:
     if is_authenticated():
         return {
             "user_id": st.session_state.get("user_id"),
-            "username": st.session_state.get("username")
+            "username": st.session_state.get("username"),
         }
     return None
 
@@ -48,15 +43,23 @@ def require_auth(func):
     """Decorator to require authentication"""
     def wrapper(*args, **kwargs):
         if not is_authenticated():
-            st.warning("⚠️ Please login to access this page")
+            st.warning("Please login to access this page")
             st.stop()
         return func(*args, **kwargs)
+
     return wrapper
 
 
-def logout():
-    """Logout user"""
-    api_service.logout()
-    st.session_state.clear()
-    st.rerun()
+def logout(all_devices: bool = False) -> None:
+    """Logout user and redirect to home page."""
+    result = api_service.logout(all_devices=all_devices)
+    warning_message = None
 
+    if all_devices and not result.get("success", False):
+        warning_message = result.get("error", "Failed to revoke all sessions on the server.")
+
+    st.session_state.clear()
+    if warning_message:
+        st.session_state["auth_notice"] = warning_message
+
+    st.switch_page("Home.py")

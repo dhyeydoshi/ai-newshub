@@ -110,7 +110,7 @@ class Article(Base):
     def to_dict(self):
         """Convert to dictionary for RL service"""
         return {
-            'article_id': self.article_id,
+            'article_id': str(self.article_id),
             'title': self.title,
             'content': self.content,
             'excerpt': self.excerpt,
@@ -125,22 +125,8 @@ class Article(Base):
             'published_date': self.published_date,
             'word_count': self.word_count or (len(self.content.split()) if self.content else 0),
             'reading_time_minutes': self.reading_time_minutes,
-            'metadata': self.metadata or {}
+            'metadata': self.meta_data or {}
 
         }
 
 
-class UserPreference(Base):
-    """User topic preferences for personalization"""
-    __tablename__ = "user_preferences"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, index=True)
-    topic = Column(String(100), nullable=False, index=True)
-    preference_score = Column(Float, default=0.5)  # 0.0 to 1.0
-
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    def __repr__(self):
-        return f"<UserPreference(user_id={self.user_id}, topic={self.topic}, score={self.preference_score})>"

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Celery Tasks for News Aggregation
 Background tasks for fetching, processing, and managing news articles
 """
@@ -53,6 +53,8 @@ async def _async_fetch_and_save_news(
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.core.database import AsyncSessionLocal
+        from app.dependencies.cache import invalidate_article_cache
+        from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
 
         # Default queries if none provided
@@ -63,13 +65,23 @@ async def _async_fetch_and_save_news(
             sources = settings.NEWS_SOURCES
 
         # Connect to Redis
-        redis_client = await aioredis.from_url(
+        redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True
         )
 
         try:
+            # Initialize centralized cache manager for invalidation
+            # This sets up the global singleton used by invalidate_article_cache()
+            init_cache_manager(
+                redis_client,
+                default_ttl=settings.REDIS_CACHE_TTL,
+                compression_threshold=1024,
+                key_prefix="news_app"
+            )
+            logger.info("Cache manager initialized for task")
+
             # Create aggregator
             aggregator = NewsAggregatorService(
                 redis_client=redis_client,
@@ -118,6 +130,12 @@ async def _async_fetch_and_save_news(
                         total_errors += 1
                         continue
 
+                # CRITICAL: Invalidate endpoint cache after fetching new articles
+                if total_saved > 0:
+                    logger.info(f"Invalidating article cache after saving {total_saved} new articles")
+                    await invalidate_article_cache()
+                    logger.info(" Article cache invalidated - users will see fresh data")
+
                 logger.info(
                     f"Scheduled fetch complete: "
                     f"Total saved: {total_saved}, "
@@ -137,7 +155,8 @@ async def _async_fetch_and_save_news(
                     'saved': total_saved,
                     'duplicates': total_duplicates,
                     'errors': total_errors,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'cache_invalidated': total_saved > 0
                 }
 
         finally:
@@ -175,6 +194,8 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.core.database import AsyncSessionLocal
+        from app.dependencies.cache import invalidate_article_cache
+        from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
 
         if not feed_urls:
@@ -183,13 +204,21 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
         logger.info(f"Celery Task: Fetching from {len(feed_urls)} RSS feeds...")
 
         # Connect to Redis
-        redis_client = await aioredis.from_url(
+        redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True
         )
 
         try:
+            # Initialize cache manager
+            cache_manager = init_cache_manager(
+                redis_client,
+                default_ttl=settings.REDIS_CACHE_TTL,
+                compression_threshold=1024,
+                key_prefix="news_app"
+            )
+
             # Create aggregator
             aggregator = NewsAggregatorService(
                 redis_client=redis_client,
@@ -205,9 +234,8 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
             )
 
             if articles:
-                # Get database session
+                # Save to database
                 async with AsyncSessionLocal() as db:
-                    # Save to database
                     stats = await article_persistence_service.save_articles(
                         articles=articles,
                         db=db,
@@ -215,33 +243,41 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                     )
 
                     logger.info(
-                        f"RSS fetch complete: "
-                        f"Saved {stats['saved']}, "
+                        f"RSS fetch complete: Saved {stats['saved']}, "
                         f"Duplicates {stats['duplicates']}, "
                         f"Errors {stats['errors']}"
                     )
+
+                    # Invalidate cache if new articles were saved
+                    if stats['saved'] > 0:
+                        logger.info(f"Invalidating article cache after saving {stats['saved']} RSS articles")
+                        await invalidate_article_cache()
+                        logger.info(" Article cache invalidated")
 
                     return {
                         'status': 'success',
                         'saved': stats['saved'],
                         'duplicates': stats['duplicates'],
                         'errors': stats['errors'],
-                        'timestamp': datetime.now(timezone.utc).isoformat()
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'cache_invalidated': stats['saved'] > 0
                     }
             else:
+                logger.info("No articles fetched from RSS feeds")
                 return {
                     'status': 'success',
                     'saved': 0,
                     'duplicates': 0,
                     'errors': 0,
-                    'message': 'No articles fetched from RSS feeds'
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'cache_invalidated': False
                 }
 
         finally:
             await redis_client.close()
 
     except Exception as e:
-        logger.error(f"Error in RSS feed fetch: {e}", exc_info=True)
+        logger.error(f"Error in RSS fetch: {e}", exc_info=True)
         raise
 
 
@@ -333,18 +369,28 @@ async def _async_fetch_news_manual(
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.core.database import AsyncSessionLocal
+        from app.dependencies.cache import invalidate_article_cache
+        from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
 
         logger.info(f"Manual fetch triggered for query: {query}")
 
         # Connect to Redis
-        redis_client = await aioredis.from_url(
+        redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True
         )
 
         try:
+            # Initialize cache manager (sets up global singleton for cache invalidation)
+            init_cache_manager(
+                redis_client,
+                default_ttl=settings.REDIS_CACHE_TTL,
+                compression_threshold=1024,
+                key_prefix="news_app"
+            )
+
             # Create aggregator
             aggregator = NewsAggregatorService(
                 redis_client=redis_client,
@@ -369,17 +415,25 @@ async def _async_fetch_news_manual(
                         auto_approve=True
                     )
 
+                    # Invalidate cache if new articles were saved
+                    if stats.get('saved', 0) > 0:
+                        logger.info(f"Invalidating article cache after manual fetch saved {stats['saved']} articles")
+                        await invalidate_article_cache()
+                        logger.info(" Article cache invalidated")
+
                     return {
                         'status': 'success',
                         'statistics': stats,
-                        'timestamp': datetime.now(timezone.utc).isoformat()
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'cache_invalidated': stats.get('saved', 0) > 0
                     }
             else:
                 return {
                     'status': 'success',
                     'statistics': {'total': 0, 'saved': 0, 'duplicates': 0, 'errors': 0},
                     'message': 'No articles found',
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'cache_invalidated': False
                 }
 
         finally:

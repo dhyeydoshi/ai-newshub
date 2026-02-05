@@ -221,7 +221,7 @@ class ArticlePersistenceService:
             query = query.where(Article.category == category)
 
         if topics:
-            query = query.where(Article.topics.overlap(topics))
+            query = query.where(Article.topics.op('&&')(topics))
 
         if language:
             query = query.where(Article.language == language)
@@ -250,7 +250,7 @@ class ArticlePersistenceService:
             query = query.where(Article.category == category)
 
         if topics:
-            query = query.where(Article.topics.overlap(topics))
+            query = query.where(Article.topics.op('&&')(topics))
 
         result = await db.execute(query)
         count = result.scalar() or 0

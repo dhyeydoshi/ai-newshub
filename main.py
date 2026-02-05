@@ -1,4 +1,4 @@
-"""
+﻿"""
 News Summarizer API - Main Application Entry Point
 Complete FastAPI app with comprehensive security middleware
 """
@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global Redis client for rate limiting
+# Global Redis client for rate limiting and caching
 redis_client: aioredis.Redis = None
 
 
@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
-    # Connect to Redis for rate limiting
+    # Connect to Redis for rate limiting and caching
     try:
         redis_client = aioredis.from_url(
             settings.REDIS_URL,
@@ -58,9 +58,12 @@ async def lifespan(app: FastAPI):
             compression_threshold=1024,  # Compress values > 1KB
             key_prefix="news_app"
         )
-        logger.info("Cache manager initialized with compression enabled")
+        logger.info(" Cache manager initialized with compression enabled")
+        logger.info(f"   - Default TTL: {settings.REDIS_CACHE_TTL}s")
+        logger.info(f"   - Compression threshold: 1KB")
+        logger.info(f"   - Key prefix: news_app")
     except Exception as e:
-        logger.warning(f"Redis connection failed: {e}. Rate limiting will be disabled.")
+        logger.warning(f"Redis connection failed: {e}. Rate limiting and caching will be disabled.")
         redis_client = None
 
     # Initialize database tables (if needed)
@@ -88,10 +91,22 @@ async def lifespan(app: FastAPI):
     
     # Log rate limiting status
     if redis_client and settings.RATE_LIMIT_ENABLED:
-        logger.info("✅ Rate limiting is ACTIVE via dependency injection (see app/dependencies/rate_limit.py)")
+        logger.info(" Rate limiting is ACTIVE via dependency injection (see app/dependencies/rate_limit.py)")
         logger.info("   Use @rate_limit() decorator or Depends(check_rate_limit) on your routes")
     else:
-        logger.info("⚠️  Rate limiting is DISABLED (Redis not connected or RATE_LIMIT_ENABLED=false)")
+        logger.info("  Rate limiting is DISABLED (Redis not connected or RATE_LIMIT_ENABLED=false)")
+
+    # Log caching status
+    if redis_client:
+        from app.dependencies.cache import CacheConfig
+        logger.info(" Redis caching is ACTIVE")
+        logger.info(f"   - Article lists: {CacheConfig.ARTICLES_LIST_TTL}s")
+        logger.info(f"   - Article details: {CacheConfig.ARTICLE_DETAIL_TTL}s")
+        logger.info(f"   - User profiles: {CacheConfig.USER_PROFILE_TTL}s")
+        logger.info(f"   - User preferences: {CacheConfig.USER_PREFERENCES_TTL}s")
+        logger.info(f"   - Recommendations: {CacheConfig.RECOMMENDATIONS_TTL}s")
+    else:
+        logger.info("  Redis caching is DISABLED")
 
     yield
 
@@ -108,7 +123,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Secure news summarizer API with comprehensive security middleware",
+    description="Secure news summarizer API with comprehensive security middleware and Redis caching",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
@@ -260,7 +275,7 @@ async def api_status():
             "database": "unknown",
             "redis": "connected" if redis_client else "disconnected",
             "rl_service": "unknown",
-            "llm_service": "unknown"
+            "llm_service": "disabled"
         }
     }
 
@@ -281,13 +296,6 @@ async def api_status():
     except:
         status_data["services"]["rl_service"] = "unavailable"
 
-    # Check LLM service
-    try:
-        from app.services.llm_service import llm_service
-        status_data["services"]["llm_service"] = "available"
-    except:
-        status_data["services"]["llm_service"] = "unavailable"
-
     return status_data
 
 
@@ -300,3 +308,4 @@ if __name__ == "__main__":
         reload=settings.DEBUG,
         log_level=settings.LOG_LEVEL.lower()
     )
+

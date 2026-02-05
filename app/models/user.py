@@ -1,4 +1,4 @@
-
+﻿
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -66,7 +66,7 @@ class User(Base):
     # Relationships
     reading_history = relationship("ReadingHistory", back_populates="user", cascade="all, delete-orphan")
     feedback = relationship("UserFeedback", back_populates="user", cascade="all, delete-orphan")
-    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")  # ✅ Add this
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")  #  Add this
 
     def __repr__(self):
         return f"<User(id={self.user_id}, username={self.username}, email={self.email})>"
@@ -94,11 +94,6 @@ class UserSession(Base):
     # Foreign key to users table
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Session tokens
-    session_token = Column(String(255), unique=True, nullable=False, index=True)
-    refresh_token = Column(String(255), unique=True, nullable=False, index=True)
-    refresh_token_jti = Column(String(255), nullable=True, index=True)
-
     # Device and security info
     device_info = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)
@@ -109,8 +104,9 @@ class UserSession(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    last_activity = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_used_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationship
     user = relationship("User", back_populates="sessions")
@@ -142,4 +138,5 @@ class LoginAttempt(Base):
 
     def __repr__(self):
         return f"<LoginAttempt {self.email} at {self.attempted_at}>"
+
 

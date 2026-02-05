@@ -1,5 +1,5 @@
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+﻿from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, desc
 from datetime import datetime, timezone, timedelta
@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from app.core.database import get_db
 from app.models.user import User
 from app.models.feedback import ReadingHistory, UserFeedback
-from app.models.article import Article, UserPreference
+from app.models.article import Article
 from app.schemas.user import (
     UserProfileResponse,
     UserProfileUpdate,
@@ -23,8 +23,14 @@ from app.schemas.user import (
 from app.schemas.auth import MessageResponse
 from app.api.auth import get_current_user_id
 from app.core.password import pwd_hasher
+from app.dependencies.cache import (
+    get_cached_response,
+    set_cached_response,
+    CacheConfig,
+    build_user_profile_key,
+    invalidate_user_cache
+)
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +38,7 @@ router = APIRouter(prefix="/user", tags=["User Profile"])
 
 
 # ============================================================================
-# PROFILE MANAGEMENT
+# PROFILE MANAGEMENT WITH CACHING
 # ============================================================================
 
 @router.get("/profile", response_model=UserProfileResponse)
@@ -43,8 +49,21 @@ async def get_user_profile(
     """
     Get current user profile
 
-    Returns comprehensive user information including reading statistics
+    Features:
+    - Redis caching (3 min TTL)
+    - Returns comprehensive user information including reading statistics
     """
+    # Build cache key
+    cache_key = build_user_profile_key(user_id=user_id)
+
+    # Check cache first
+    cached_response = await get_cached_response(cache_key)
+    if cached_response:
+        logger.info(f" Cache HIT for user profile: {user_id}")
+        return UserProfileResponse(**cached_response)
+
+    logger.info(f" Cache MISS for user profile: {user_id} - Querying database")
+
     result = await db.execute(
         select(User).where(User.user_id == user_id)
     )
@@ -56,7 +75,12 @@ async def get_user_profile(
             detail="User not found"
         )
 
-    return UserProfileResponse.model_validate(user)
+    response = UserProfileResponse.model_validate(user)
+
+    # Cache the response
+    await set_cached_response(cache_key, response.model_dump(), CacheConfig.USER_PROFILE_TTL)
+
+    return response
 
 
 @router.put("/profile", response_model=UserProfileResponse)
@@ -72,6 +96,7 @@ async def update_user_profile(
     - Username uniqueness validation
     - Email uniqueness validation
     - Input sanitization via Pydantic
+    - Cache invalidation on update
     """
     result = await db.execute(
         select(User).where(User.user_id == user_id)
@@ -117,11 +142,15 @@ async def update_user_profile(
     await db.commit()
     await db.refresh(user)
 
+    # Invalidate user cache after update
+    await invalidate_user_cache(user_id)
+    logger.info(f"Invalidated cache for user: {user_id}")
+
     return UserProfileResponse.model_validate(user)
 
 
 # ============================================================================
-# PREFERENCES MANAGEMENT
+# PREFERENCES MANAGEMENT WITH CACHING
 # ============================================================================
 
 @router.get("/preferences", response_model=UserPreferencesResponse)
@@ -132,8 +161,21 @@ async def get_user_preferences(
     """
     Get user preferences for personalization
 
-    Returns topic preferences, favorite topics, and notification settings
+    Features:
+    - Redis caching (2 hours TTL)
+    - Returns topic preferences, favorite topics, and notification settings
     """
+    # Build cache key
+    cache_key = f"user:preferences:{user_id}"
+
+    # Check cache first
+    cached_response = await get_cached_response(cache_key)
+    if cached_response:
+        logger.info(f" Cache HIT for user preferences: {user_id}")
+        return UserPreferencesResponse(**cached_response)
+
+    logger.info(f" Cache MISS for user preferences: {user_id} - Querying database")
+
     result = await db.execute(
         select(User).where(User.user_id == user_id)
     )
@@ -156,7 +198,12 @@ async def get_user_preferences(
         "push_notifications": True
     }
 
-    return UserPreferencesResponse(**response_data)
+    response = UserPreferencesResponse(**response_data)
+
+    # Cache the response
+    await set_cached_response(cache_key, response.model_dump(), CacheConfig.USER_PREFERENCES_TTL)
+
+    return response
 
 
 @router.put("/preferences", response_model=UserPreferencesResponse)
@@ -171,10 +218,11 @@ async def update_user_preferences(
     Security:
     - Input validation and sanitization
     - Preference score bounds checking (0.0-1.0)
+    - Cache invalidation on update
     """
-    # Get user from model.user (integer id)
+    # Get user
     result = await db.execute(
-        select(User).where(User.id == int(user_id.split('-')[0]) if '-' not in str(user_id) else User.user_id == user_id)
+        select(User).where(User.user_id == user_id)
     )
     user = result.scalar_one_or_none()
 
@@ -200,6 +248,10 @@ async def update_user_preferences(
     await db.commit()
     await db.refresh(user)
 
+    # Invalidate user cache and recommendations cache after update
+    await invalidate_user_cache(user_id)
+    logger.info(f"Invalidated cache for user preferences: {user_id}")
+
     return await get_user_preferences(user_id, db)
 
 
@@ -224,7 +276,7 @@ async def get_reading_history(
 
     # Get total count
     count_query = select(func.count(ReadingHistory.id)).where(
-        ReadingHistory.user_id == int(user_id.split('-')[0]) if '-' not in str(user_id) else user_id
+        ReadingHistory.user_id == user_id
     )
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -232,8 +284,8 @@ async def get_reading_history(
     # Get reading history with article details
     query = (
         select(ReadingHistory, Article)
-        .join(Article, ReadingHistory.article_id == Article.id)
-        .where(ReadingHistory.user_id == int(user_id.split('-')[0]) if '-' not in str(user_id) else user_id)
+        .join(Article, ReadingHistory.article_id == Article.article_id)
+        .where(ReadingHistory.user_id == user_id)
         .order_by(desc(ReadingHistory.viewed_at))
         .limit(page_size)
         .offset(offset)
@@ -246,7 +298,7 @@ async def get_reading_history(
     items = []
     for history, article in history_items:
         items.append(ReadingHistoryItem(
-            article_id=article.id,
+            article_id=article.article_id,
             article_title=article.title,
             article_url=str(article.url),
             topics=article.topics or [],
@@ -286,7 +338,7 @@ async def get_user_engagement(
         )
 
     # Calculate statistics
-    user_int_id = user.id
+    user_int_id = user.user_id
 
     # Total articles viewed
     viewed_count = await db.execute(
@@ -319,7 +371,7 @@ async def get_user_engagement(
     # Most read topics (from reading history)
     topic_query = (
         select(Article.topics)
-        .join(ReadingHistory, Article.id == ReadingHistory.article_id)
+        .join(ReadingHistory, Article.article_id == ReadingHistory.article_id)
         .where(ReadingHistory.user_id == user_int_id)
     )
     topic_result = await db.execute(topic_query)
@@ -382,13 +434,7 @@ async def delete_user_account(
         )
 
     # Verify password
-    from app.models.user import User as AuthUser
-    auth_result = await db.execute(
-        select(AuthUser).where(AuthUser.user_id == user_id)
-    )
-    auth_user = auth_result.scalar_one_or_none()
-
-    if auth_user and not pwd_hasher.verify_password(deletion_request.password, auth_user.password_hash):
+    if not pwd_hasher.verify_password(deletion_request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid password"
@@ -399,13 +445,10 @@ async def delete_user_account(
         logger.info(f"Account deletion - User: {user.username}, Reason: {deletion_request.reason}")
 
     # Soft delete - anonymize data
-    user.email = f"deleted_{user.id}@deleted.local"
-    user.username = f"deleted_user_{user.id}"
+    user.email = f"deleted_{user.user_id}@deleted.local"
+    user.username = f"deleted_user_{user.user_id}"
     user.is_active = False
     user.data_processing_consent = False
-
-    if auth_user:
-        auth_user.is_active = False
 
     await db.commit()
 
@@ -454,8 +497,8 @@ async def export_user_data(
     if export_request.include_reading_history:
         history_result = await db.execute(
             select(ReadingHistory, Article)
-            .join(Article, ReadingHistory.article_id == Article.id)
-            .where(ReadingHistory.user_id == user.id)
+            .join(Article, ReadingHistory.article_id == Article.article_id)
+            .where(ReadingHistory.user_id == user.user_id)
         )
         history_data = []
         for history, article in history_result:
@@ -478,7 +521,7 @@ async def export_user_data(
     if export_request.include_feedback:
         feedback_result = await db.execute(
             select(UserFeedback)
-            .where(UserFeedback.user_id == user.id)
+            .where(UserFeedback.user_id == user.user_id)
         )
         feedback_data = [
             {

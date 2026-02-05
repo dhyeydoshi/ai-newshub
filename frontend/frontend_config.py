@@ -1,5 +1,4 @@
-"""
-Configuration Management for Streamlit Frontend
+﻿"""Configuration Management for Streamlit Frontend
 Handles environment variables and app settings
 """
 import os
@@ -33,7 +32,7 @@ class Config:
 
     # Page Configuration
     PAGE_TITLE: str = "News Summarizer"
-    PAGE_ICON: str = "📰"
+    PAGE_ICON: str = ""
     LAYOUT: str = "wide"
 
     @classmethod
@@ -41,7 +40,7 @@ class Config:
         """Get API request headers"""
         headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json",
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -50,4 +49,3 @@ class Config:
 
 # Export singleton instance
 config = Config()
-

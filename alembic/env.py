@@ -19,8 +19,8 @@ from app.core.database import Base
 
 # Import all models to ensure they're registered with Base.metadata
 from app.models.user import User
-from app.models.article import Article, UserPreference
-from app.models.feedback import ReadingHistory, UserFeedback, RLTrainingData
+from app.models.article import Article
+from app.models.feedback import ReadingHistory, UserFeedback
 
 # this is the Alembic Config object
 config = context.config

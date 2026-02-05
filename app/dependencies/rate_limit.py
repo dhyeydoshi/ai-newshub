@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import Request, HTTPException, status
 from datetime import datetime
 import logging
+from app.middleware.rate_limit import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ async def get_rate_limiter():
     Uses the global redis_client initialized during app startup
     """
     from main import redis_client
-    from app.middleware.rate_limit import RateLimiter
     from config import settings
 
     if not redis_client or not settings.RATE_LIMIT_ENABLED:

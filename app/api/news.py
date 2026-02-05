@@ -104,7 +104,7 @@ class NewsResponse(BaseModel):
 async def get_redis_client() -> aioredis.Redis:
     """Get Redis client for news aggregation"""
     try:
-        redis = await aioredis.from_url(
+        redis = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
@@ -178,6 +178,12 @@ async def aggregate_news(
                     status_code=400,
                     detail=f"Invalid sources: {invalid}. Valid: {valid_sources}"
                 )
+        else:
+            source_list = list(settings.NEWS_SOURCES)
+            if settings.ENABLE_RSS_FEEDS and "rss" not in source_list:
+                source_list.append("rss")
+
+        feed_urls = settings.RSS_FEED_URLS if "rss" in source_list and settings.RSS_FEED_URLS else None
 
         # Fetch articles
         articles = await aggregator.aggregate_news(
@@ -187,9 +193,9 @@ async def aggregate_news(
             deduplicate=deduplicate,
             use_cache=use_cache,
             category=category,
-            language=language
+            language=language,
+            feed_urls=feed_urls
         )
-        print(articles)
 
         # Save to database if requested
         if save_to_db and articles:
@@ -278,7 +284,7 @@ async def get_available_sources():
                 "id": "rss",
                 "name": "RSS Feeds",
                 "description": "Custom RSS feed aggregation",
-                "enabled": True,
+                "enabled": settings.ENABLE_RSS_FEEDS and bool(settings.RSS_FEED_URLS),
                 "features": ["custom_feeds", "any_source"]
             }
         ],

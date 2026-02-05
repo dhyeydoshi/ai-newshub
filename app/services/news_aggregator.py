@@ -140,15 +140,12 @@ class ContentSanitizer:
         try:
             soup = BeautifulSoup(html, 'lxml')
 
-            # Remove dangerous tags
+            # Remove dangerous and unknown tags, clean attributes for allowed tags
             for tag in soup.find_all():
-                if tag.name in cls.DANGEROUS_TAGS:
+                if tag.name in cls.DANGEROUS_TAGS or tag.name not in cls.ALLOWED_TAGS:
                     tag.decompose()
                     continue
-                elif tag.name in cls.ALLOWED_TAGS:
-                    tag.unwrap()
-                    continue
-                
+
                 # Remove dangerous attributes
                 attrs_to_remove = []
                 for attr in tag.attrs:
@@ -156,10 +153,10 @@ class ContentSanitizer:
                         attrs_to_remove.append(attr)
                     elif attr.lower().startswith('on'):  # All event handlers
                         attrs_to_remove.append(attr)
-                
+
                 for attr in attrs_to_remove:
                     del tag[attr]
-                
+
                 # Sanitize href and src attributes
                 if 'href' in tag.attrs:
                     tag['href'] = cls._sanitize_url(tag['href'])
@@ -524,7 +521,7 @@ class GDELTFetcher(BaseFetcher):
         """Normalize GDELT article format"""
         return {
             'title': item.get('title', ''),
-            'content': item.get('seendate', ''),  # GDELT doesn't provide full content
+            'content': item.get('title', ''),  # GDELT doesn't provide full content
             'description': item.get('title', ''),
             'url': item.get('url', ''),
             'source': item.get('domain', 'GDELT'),
@@ -737,8 +734,8 @@ class NewsAggregatorService:
         # Initialize fetchers
         self.fetchers = {
             'newsapi': NewsAPIFetcher(api_key=newsapi_key),
-            # 'gdelt': GDELTFetcher(),
-            # 'rss': RSSFetcher()
+            'gdelt': GDELTFetcher(),
+            'rss': RSSFetcher()
         }
     
     async def aggregate_news(
@@ -786,20 +783,33 @@ class NewsAggregatorService:
         # Fetch from all sources concurrently
         tasks = []
         for source in sources:
-            if source in self.fetchers:
-                fetcher = self.fetchers[source]
-                if source == 'rss' and 'feed_url' in kwargs:
-                    task = fetcher.fetch_articles(
-                        feed_url=kwargs['feed_url'],
-                        limit=limit
-                    )
+            if source not in self.fetchers:
+                continue
+
+            fetcher = self.fetchers[source]
+
+            if source == 'rss':
+                feed_urls = kwargs.get('feed_urls')
+                feed_url = kwargs.get('feed_url')
+
+                if feed_urls:
+                    for url in feed_urls:
+                        tasks.append(fetcher.fetch_articles(feed_url=url, limit=limit))
+                elif feed_url:
+                    tasks.append(fetcher.fetch_articles(feed_url=feed_url, limit=limit))
+                elif query and isinstance(query, str) and query.startswith(("http://", "https://")):
+                    tasks.append(fetcher.fetch_articles(feed_url=query, limit=limit))
                 else:
-                    task = fetcher.fetch_articles(
-                        query=query,
-                        limit=limit,
-                        **kwargs
-                    )
-                tasks.append(task)
+                    logger.info("RSS source selected but no feed URLs provided")
+                continue
+
+            extra_params = {k: v for k, v in kwargs.items() if k not in {"feed_urls", "feed_url"}}
+            task = fetcher.fetch_articles(
+                query=query,
+                limit=limit,
+                **extra_params
+            )
+            tasks.append(task)
         
         # Wait for all fetches to complete
         results = await asyncio.gather(*tasks, return_exceptions=True)

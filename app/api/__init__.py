@@ -18,10 +18,10 @@ def include_routers():
 
     api_router.include_router(auth_router, tags=["Authentication"])
     api_router.include_router(articles_router,tags=["Articles"])
-    api_router.include_router(user_router, prefix="/users", tags=["Users"])
-    api_router.include_router(feedback_router, prefix="/feedback", tags=["Feedback"])
-    api_router.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
-    api_router.include_router(recommendations_router, prefix="/recommendations", tags=["Recommendations"])
+    api_router.include_router(user_router, tags=["Users"])
+    api_router.include_router(feedback_router, tags=["Feedback"])
+    api_router.include_router(analytics_router, tags=["Analytics"])
+    api_router.include_router(recommendations_router, tags=["Recommendations"])
     api_router.include_router(news_router, tags=["News Aggregation"])
 
     return api_router

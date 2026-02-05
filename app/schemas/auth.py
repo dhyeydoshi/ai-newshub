@@ -2,7 +2,7 @@
 Pydantic Schemas for Authentication
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from uuid import UUID
 import re
@@ -136,7 +136,7 @@ class PasswordStrengthResponse(BaseModel):
     valid: bool
     score: int
     feedback: str
-    suggestions: list[str]
+    suggestions: List[str]
     crack_time: Optional[str] = None
 
 

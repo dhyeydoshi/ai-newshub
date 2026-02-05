@@ -3,8 +3,10 @@ Authentication Router
 Complete JWT-based authentication system with security features
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, and_
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.models.user import User, LoginAttempt, UserSession
@@ -33,6 +35,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    """Clear refresh-token cookie from client."""
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        httponly=True,
+        secure=settings.ENVIRONMENT == "production",
+        samesite="lax"
+    )
 
 
 # ============================================================================
@@ -289,39 +302,61 @@ async def logout(
             session_id = payload.get("sid")
 
             if session_id:
-                # Revoke session
-                from app.models.user import UserSession
-                from datetime import datetime, timezone
-                from sqlalchemy import and_
-
-                result = await db.execute(
-                    select(UserSession).where(
+                # Revoke only this session for device-level logout
+                await db.execute(
+                    update(UserSession)
+                    .where(
                         and_(
                             UserSession.session_id == session_id,
                             UserSession.is_active == True
                         )
                     )
+                    .values(
+                        is_active=False,
+                        revoked_at=datetime.now(timezone.utc)
+                    )
                 )
-                session = result.scalar_one_or_none()
-
-                if session:
-                    session.is_active = False
-                    session.revoked_at = datetime.now(timezone.utc)
-                    await db.commit()
+                await db.commit()
         except Exception as e:
             logger.warning(f"Error revoking session: {e}")
 
-    # Clear cookie
-    response.delete_cookie(
-        key="refresh_token",
-        path="/",
-        httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="lax"
-)
+    _clear_refresh_cookie(response)
 
     return MessageResponse(
         message="Logged out successfully",
+        success=True
+    )
+
+
+@router.post("/logout-all", response_model=MessageResponse)
+async def logout_all(
+    response: Response,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Logout from all devices by revoking all active sessions.
+    """
+    await db.execute(
+        update(UserSession)
+        .where(
+            and_(
+                UserSession.user_id == user_id,
+                UserSession.is_active == True
+            )
+        )
+        .values(
+            is_active=False,
+            revoked_at=datetime.now(timezone.utc)
+        )
+    )
+    await db.commit()
+
+    # Also clear cookie in current client
+    _clear_refresh_cookie(response)
+
+    return MessageResponse(
+        message="Logged out from all devices successfully",
         success=True
     )
 
@@ -435,7 +470,7 @@ async def get_current_user(
     )
 
 
-@router.get("/sessions", response_model=list[SessionResponse])
+@router.get("/sessions", response_model=List[SessionResponse])
 async def get_user_sessions(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
