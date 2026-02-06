@@ -101,7 +101,7 @@ async def trigger_manual_fetch(
         logger.error(f"Error triggering manual fetch: {e}", exc_info=True)
         return {
             'success': False,
-            'error': str(e)
+            'error': 'Failed to queue news fetch task'
         }
 
 
@@ -122,14 +122,15 @@ async def get_task_status(task_id: str) -> Dict[str, Any]:
             if result.successful():
                 response['result'] = result.result
             else:
-                response['error'] = str(result.info)
+                logger.error(f"Task {task_id} failed: {result.info}")
+                response['error'] = 'Task failed'
 
         return response
     except Exception as e:
         logger.error(f"Error getting task status: {e}")
         return {
             'task_id': task_id,
-            'error': str(e)
+            'error': 'Failed to retrieve task status'
         }
 
 
@@ -147,7 +148,7 @@ async def revoke_task(task_id: str, terminate: bool = False) -> Dict[str, Any]:
         return {
             'success': False,
             'task_id': task_id,
-            'error': str(e)
+            'error': 'Failed to revoke task'
         }
 
 

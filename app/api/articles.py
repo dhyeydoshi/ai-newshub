@@ -166,8 +166,18 @@ async def fetch_news_now(
 
 
 @router.get("/task-status/{task_id}")
-async def get_task_status_endpoint(task_id: str):
+async def get_task_status_endpoint(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
     """Get status of a Celery task"""
+    import re as _re
+    # Validate task_id format (UUID-like Celery task IDs)
+    if not _re.match(r'^[a-f0-9\-]{8,50}$', task_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid task ID format"
+        )
     try:
         from app.utils.celery_helpers import get_task_status
 
@@ -178,32 +188,29 @@ async def get_task_status_endpoint(task_id: str):
         logger.error(f"Error getting task status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to retrieve task status"
         )
 
 
 @router.get("/scheduler/status")
-async def get_scheduler_status():
+async def get_scheduler_status(
+    user_id: str = Depends(get_current_user_id)
+):
     """Get Celery worker and scheduler status"""
     try:
         from app.utils.celery_helpers import get_celery_status, get_last_fetch_time
-        import redis.asyncio as aioredis
+        from main import redis_client
 
         # Get Celery status
         celery_status = await get_celery_status()
 
-        # Get last fetch time from Redis
-        try:
-            redis_client = aioredis.from_url(
-                settings.REDIS_URL,
-                encoding="utf-8",
-                decode_responses=True
-            )
-            last_fetch = await get_last_fetch_time(redis_client)
-            await redis_client.close()
-        except Exception as e:
-            logger.error(f"Error getting last fetch time: {e}")
-            last_fetch = None
+        # Get last fetch time from Redis (reuse global client)
+        last_fetch = None
+        if redis_client:
+            try:
+                last_fetch = await get_last_fetch_time(redis_client)
+            except Exception as e:
+                logger.error(f"Error getting last fetch time: {e}")
 
         return {
             "celery": celery_status,
@@ -216,13 +223,14 @@ async def get_scheduler_status():
         logger.error(f"Error getting scheduler status: {e}")
         return {
             "enabled": settings.ENABLE_NEWS_SCHEDULER,
-            "error": str(e),
             "message": "Make sure Celery worker is running"
         }
 
 
 @router.get("/scheduler/tasks")
-async def get_scheduled_tasks():
+async def get_scheduled_tasks(
+    user_id: str = Depends(get_current_user_id)
+):
     """Get information about scheduled periodic tasks"""
     try:
         from app.utils.celery_helpers import get_scheduled_tasks_info
@@ -233,7 +241,7 @@ async def get_scheduled_tasks():
         logger.error(f"Error getting scheduled tasks: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to retrieve scheduled tasks"
         )
 
 
@@ -551,8 +559,19 @@ async def search_articles(
     # Build search query
     search_query = select(Article).where(Article.is_active == True)
 
-    # Text search (case-insensitive) - sanitize query
-    safe_query = query.replace("%", "").replace("_", "").strip()
+    # Text search (case-insensitive) - escape LIKE special characters
+    safe_query = (
+        query
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        .strip()
+    )
+    if not safe_query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query cannot be empty after sanitization"
+        )
     search_query = search_query.where(
         or_(
             Article.title.ilike(f"%{safe_query}%"),

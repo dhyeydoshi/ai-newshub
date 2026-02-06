@@ -102,7 +102,9 @@ async def register(
 @router.post("/verify-email", response_model=MessageResponse)
 async def verify_email(
     verification_data: EmailVerification,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
     user = await auth_service.verify_email(verification_data.token, db)
 
@@ -115,7 +117,9 @@ async def verify_email(
 @router.post("/resend-verification", response_model=MessageResponse)
 async def resend_verification(
     data: ResendVerification,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
     result = await db.execute(
         select(User).where(User.email == data.email)
@@ -334,11 +338,9 @@ async def reset_password(
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
     data: PasswordChange,
-    request: Request,
+    user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    user_id = request.state.user_id
-
     await auth_service.change_password(
         user_id,
         data.current_password,

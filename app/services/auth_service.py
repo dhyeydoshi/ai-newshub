@@ -536,16 +536,11 @@ class AuthService:
         user.last_password_change = datetime.now(timezone.utc)
 
         # Revoke all sessions for security
-        await db.execute(
-            select(UserSession).where(
-                and_(
-                    UserSession.user_id == user.user_id,
-                    UserSession.is_active == True
-                )
-            )
-        )
         sessions = (await db.execute(
-            select(UserSession).where(UserSession.user_id == user.user_id)
+            select(UserSession).where(
+                UserSession.user_id == user.user_id,
+                UserSession.is_active == True
+            )
         )).scalars().all()
 
         for session in sessions:

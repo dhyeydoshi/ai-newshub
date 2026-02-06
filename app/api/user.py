@@ -5,7 +5,7 @@ from sqlalchemy import select, func, and_, desc
 from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
-from app.models.user import User
+from app.models.user import User, UserSession
 from app.models.feedback import ReadingHistory, UserFeedback
 from app.models.article import Article
 from app.schemas.user import (
@@ -379,9 +379,26 @@ async def delete_user_account(
     if deletion_request.reason:
         logger.info(f"Account deletion - User: {user.username}, Reason: {deletion_request.reason}")
 
-    # Soft delete - anonymize data
+    # Revoke all active sessions
+    sessions_result = await db.execute(
+        select(UserSession).where(
+            UserSession.user_id == user.user_id,
+            UserSession.is_active == True
+        )
+    )
+    for session in sessions_result.scalars():
+        session.is_active = False
+        session.revoked_at = datetime.now(timezone.utc)
+
+    # Soft delete - anonymize data and clear sensitive fields
     user.email = f"deleted_{user.user_id}@deleted.local"
     user.username = f"deleted_user_{user.user_id}"
+    user.password_hash = "DELETED"
+    user.full_name = None
+    user.reset_token = None
+    user.reset_token_expires = None
+    user.verification_token = None
+    user.verification_token_expires = None
     user.is_active = False
     user.data_processing_consent = False
 
