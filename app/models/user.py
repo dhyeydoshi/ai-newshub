@@ -94,6 +94,9 @@ class UserSession(Base):
     # Foreign key to users table
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
 
+    # Token security
+    refresh_token_jti = Column(String(255), nullable=True, index=True)
+
     # Device and security info
     device_info = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)

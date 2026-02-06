@@ -61,8 +61,7 @@ class AuthService:
         if not strength['valid']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Password too weak: {strength['feedback']}",
-                headers={"X-Password-Suggestions": ", ".join(strength['suggestions'])}
+                detail=f"Password too weak: {strength['feedback']}"
             )
 
         # Hash password
@@ -181,7 +180,7 @@ class AuthService:
             if user.locked_until > datetime.now(timezone.utc):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Account locked until {user.locked_until.isoformat()}"
+                    detail="Account is temporarily locked. Please try again later."
                 )
             else:
                 # Unlock account if lockout period has passed
@@ -245,7 +244,7 @@ class AuthService:
 
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Account locked due to too many failed login attempts. Try again after {settings.ACCOUNT_LOCKOUT_DURATION_MINUTES} minutes."
+                    detail="Account locked due to too many failed login attempts. Please try again later."
                 )
 
             await db.commit()
@@ -262,7 +261,7 @@ class AuthService:
             remaining_attempts = settings.MAX_LOGIN_ATTEMPTS - user.failed_login_attempts
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Incorrect email or password. {remaining_attempts} attempts remaining."
+                detail="Incorrect email or password"
             )
 
         # Check if password needs rehashing
@@ -338,7 +337,7 @@ class AuthService:
             select(UserSession).where(
                 and_(
                     UserSession.session_id == session_id,
-                    # UserSession.refresh_token_jti == jti,
+                    UserSession.refresh_token_jti == jti,
                     UserSession.is_active == True
                 )
             )
@@ -388,7 +387,7 @@ class AuthService:
 
         # Update session with new refresh token JTI
         new_payload = jwt_manager.decode_token(new_refresh_token)
-        # session.refresh_token_jti = new_payload.get("jti")
+        session.refresh_token_jti = new_payload.get("jti")
         session.last_used_at = datetime.now(timezone.utc)
 
         await db.commit()
@@ -483,6 +482,19 @@ class AuthService:
         user.password_hash = pwd_hasher.hash_password(new_password)
         user.last_password_change = datetime.now(timezone.utc)
 
+        # Revoke all other active sessions for security
+        result = await db.execute(
+            select(UserSession).where(
+                and_(
+                    UserSession.user_id == user_id,
+                    UserSession.is_active == True
+                )
+            )
+        )
+        for session in result.scalars():
+            session.is_active = False
+            session.revoked_at = datetime.now(timezone.utc)
+
         await db.commit()
         await db.refresh(user)
 
@@ -575,7 +587,7 @@ class AuthService:
         session = UserSession(
             user_id=user.user_id,
             session_id=uuid.uuid4(),
-            # refresh_token_jti=pwd_hasher.generate_secure_token(16),
+            refresh_token_jti=pwd_hasher.generate_secure_token(16),
             ip_address=ip_address,
             user_agent=user_agent,
             expires_at=expires_at
