@@ -1,7 +1,3 @@
-"""
-API Router Package
-Exports all API routers for easy registration
-"""
 from fastapi import APIRouter
 
 api_router = APIRouter()

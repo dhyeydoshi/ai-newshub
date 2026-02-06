@@ -1,6 +1,3 @@
-"""
-Dependencies package initialization
-"""
 from .rate_limit import check_rate_limit, rate_limit, RateLimitPresets
 from .cache import (
     cache_endpoint,

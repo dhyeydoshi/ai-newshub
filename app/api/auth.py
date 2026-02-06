@@ -1,7 +1,3 @@
-"""
-Authentication Router
-Complete JWT-based authentication system with security features
-"""
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +25,7 @@ from app.schemas.auth import (
 from app.services.auth_service import auth_service
 from app.core.jwt import jwt_manager
 from app.core.password import pwd_hasher
+from app.dependencies.rate_limit import RateLimitPresets
 from config import settings
 import logging
 
@@ -48,10 +45,6 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-# ============================================================================
-# HELPER DEPENDENCIES
-# ============================================================================
-
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Security
 
@@ -62,11 +55,6 @@ async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Security(security),
     db: AsyncSession = Depends(get_db)
 ) -> str:
-    """
-    Extract and validate user ID from JWT token
-
-    Returns user_id for use in protected endpoints
-    """
     token = credentials.credentials
     payload = jwt_manager.decode_token(token)
 
@@ -99,25 +87,13 @@ async def get_current_user_id(
     return user_id
 
 
-# ============================================================================
-# REGISTRATION & EMAIL VERIFICATION
-# ============================================================================
-
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserRegister,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
-    """
-    Register a new user
-
-    Security Features:
-    - Password strength validation (zxcvbn)
-    - Email uniqueness check
-    - Username uniqueness check
-    - Argon2 password hashing
-    - Email verification token generation
-    """
     user, verification_token = await auth_service.register_user(user_data, db)
 
     return UserResponse.model_validate(user)
@@ -128,11 +104,6 @@ async def verify_email(
     verification_data: EmailVerification,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Verify user email with token
-
-    Required for account activation if EMAIL_VERIFICATION_REQUIRED is enabled
-    """
     user = await auth_service.verify_email(verification_data.token, db)
 
     return MessageResponse(
@@ -146,9 +117,6 @@ async def resend_verification(
     data: ResendVerification,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Resend email verification link
-    """
     result = await db.execute(
         select(User).where(User.email == data.email)
     )
@@ -181,29 +149,14 @@ async def resend_verification(
     )
 
 
-# ============================================================================
-# LOGIN & TOKEN MANAGEMENT
-# ============================================================================
-
 @router.post("/login", response_model=LoginResponse)
 async def login(
     login_data: UserLogin,
     request: Request,
     response: Response,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
-    """
-    Login with email and password
-
-    Security Features:
-    - Account lockout after 5 failed attempts
-    - 30-minute lockout duration
-    - Email verification requirement
-    - Argon2 password verification
-    - JWT token generation (RS256)
-    - Refresh token in httpOnly cookie
-    - Session tracking
-    """
     user, access_token, refresh_token, cookie_config = await auth_service.login(
         login_data,
         request,
@@ -237,14 +190,6 @@ async def refresh_token(
     token_data: TokenRefresh = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Refresh access token using refresh token
-
-    Token Rotation:
-    - Old refresh token is invalidated
-    - New refresh token is issued
-    - Stored in httpOnly cookie
-    """
     # Get refresh token from cookie or body
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token and token_data:
@@ -261,14 +206,15 @@ async def refresh_token(
         refresh_token,
         db
     )
-    cookie_max_age = request.cookies.get("refresh_token_max_age", 24 * 60 * 60)
 
+    # Use server-side configured expiry (never trust client-provided values)
+    cookie_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
     # Update refresh token in cookie
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
-        max_age=int(cookie_max_age),
+        max_age=cookie_max_age,
         httponly=True,
         secure=settings.ENVIRONMENT == "production",
         samesite="lax",
@@ -289,9 +235,6 @@ async def logout(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Logout and revoke session
-    """
     # Get refresh token from cookie
     refresh_token = request.cookies.get("refresh_token")
 
@@ -334,9 +277,6 @@ async def logout_all(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Logout from all devices by revoking all active sessions.
-    """
     await db.execute(
         update(UserSession)
         .where(
@@ -361,20 +301,13 @@ async def logout_all(
     )
 
 
-# ============================================================================
-# PASSWORD MANAGEMENT
-# ============================================================================
-
 @router.post("/password-reset-request", response_model=MessageResponse)
 async def request_password_reset(
     data: PasswordResetRequest,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
-    """
-    Request password reset email
-
-    Always returns success to prevent user enumeration
-    """
     await auth_service.request_password_reset(data.email, db)
 
     return MessageResponse(
@@ -386,16 +319,10 @@ async def request_password_reset(
 @router.post("/password-reset", response_model=MessageResponse)
 async def reset_password(
     data: PasswordReset,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
-    """
-    Reset password with token
-
-    Security Features:
-    - Token expiration (1 hour)
-    - Password strength validation
-    - All sessions revoked after reset
-    """
     await auth_service.reset_password(data.token, data.new_password, db)
 
     return MessageResponse(
@@ -410,11 +337,6 @@ async def change_password(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Change password for authenticated user
-
-    Requires current password verification
-    """
     user_id = request.state.user_id
 
     await auth_service.change_password(
@@ -430,18 +352,11 @@ async def change_password(
     )
 
 
-# ============================================================================
-# USER PROFILE
-# ============================================================================
-
 @router.get("/me", response_model=UserDetailResponse)
 async def get_current_user(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get current authenticated user profile
-    """
     result = await db.execute(
         select(User).where(User.user_id == user_id)
     )
@@ -475,9 +390,6 @@ async def get_user_sessions(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get all active sessions for current user
-    """
     from app.models.user import UserSession
 
     result = await db.execute(
@@ -497,9 +409,6 @@ async def revoke_session(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Revoke a specific session
-    """
     from app.models.user import UserSession
     from datetime import datetime, timezone
     from sqlalchemy import and_

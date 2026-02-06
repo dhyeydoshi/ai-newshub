@@ -1,7 +1,3 @@
-"""
-CORS Middleware with Whitelist Configuration
-Handles preflight requests and CORS headers
-"""
 from typing import List, Optional
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -14,10 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class CORSMiddleware(BaseHTTPMiddleware):
-    """
-    Custom CORS middleware with whitelist configuration
-    Handles preflight requests and applies CORS headers
-    """
 
     def __init__(
         self,
@@ -98,8 +90,8 @@ class CORSMiddleware(BaseHTTPMiddleware):
         requested_method = request.headers.get("access-control-request-method")
         requested_headers = request.headers.get("access-control-request-headers")
 
-        # Validate requested method
-        if requested_method and requested_method not in self.allow_methods:
+        # Validate requested method ("*" allows all methods)
+        if requested_method and "*" not in self.allow_methods and requested_method not in self.allow_methods:
             logger.warning(f"CORS method not allowed: {requested_method}")
             return Response(
                 content="Method not allowed",

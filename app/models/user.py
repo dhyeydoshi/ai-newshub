@@ -134,7 +134,7 @@ class LoginAttempt(Base):
     failure_reason = Column(String(255))
 
     # Timestamps
-    attempted_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
+    attempted_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
     def __repr__(self):
         return f"<LoginAttempt {self.email} at {self.attempted_at}>"

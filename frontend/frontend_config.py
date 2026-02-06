@@ -1,7 +1,4 @@
-﻿"""Configuration Management for Streamlit Frontend
-Handles environment variables and app settings
-"""
-import os
+﻿import os
 from typing import Optional
 from dotenv import load_dotenv
 

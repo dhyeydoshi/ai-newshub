@@ -1,10 +1,3 @@
-"""
-Rate Limiting with Redis Backend
-Implements per-user rate limiting with exponential backoff
-
-NOTE: This uses dependency injection, NOT middleware!
-See: app/dependencies/rate_limit.py for usage in routes
-"""
 import time
 import hashlib
 from typing import Optional, Dict, Any
@@ -17,26 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
-    """
-    Redis-backed rate limiter with exponential backoff
-
-    Features:
-    - Per-user or per-IP rate limiting
-    - Exponential backoff for repeat violators
-    - Automatic temporary bans after max violations
-    - Configurable limits and timeouts
-
-    Usage:
-        # Create rate limiter instance
-        limiter = RateLimiter(redis_client)
-
-        # Check if request is allowed
-        allowed, metadata = await limiter.check_rate_limit("user:123")
-
-        if not allowed:
-            # Handle rate limit exceeded
-            return {"error": metadata["error"]}
-    """
 
     def __init__(self, redis_client: aioredis.Redis):
         self.redis = redis_client
@@ -47,17 +20,6 @@ class RateLimiter:
         self.ban_duration = settings.RATE_LIMIT_BAN_DURATION_MINUTES
 
     async def check_rate_limit(self, identifier: str) -> tuple[bool, Dict[str, Any]]:
-        """
-        Check if request should be rate limited
-
-        Args:
-            identifier: Unique identifier for the user/IP (e.g., "user:123" or "ip:1.2.3.4")
-
-        Returns:
-            Tuple of (allowed: bool, metadata: dict)
-            - allowed: True if request is allowed, False if rate limited
-            - metadata: Dict with rate limit info (limit, remaining, error, etc.)
-        """
         current_time = int(time.time())
         minute_key = f"rate_limit:{identifier}:{current_time // 60}"
         violation_key = f"violations:{identifier}"
@@ -145,15 +107,6 @@ class RateLimiter:
         }
 
     async def get_user_stats(self, identifier: str) -> Dict[str, Any]:
-        """
-        Get current rate limit statistics for a user
-
-        Args:
-            identifier: User identifier
-
-        Returns:
-            Dictionary with current stats (count, violations, banned status)
-        """
         current_time = int(time.time())
         minute_key = f"rate_limit:{identifier}:{current_time // 60}"
         violation_key = f"violations:{identifier}"
@@ -177,15 +130,6 @@ class RateLimiter:
         return stats
 
     async def reset_user_limits(self, identifier: str) -> bool:
-        """
-        Reset all rate limits and violations for a user (admin function)
-
-        Args:
-            identifier: User identifier
-
-        Returns:
-            True if successful
-        """
         current_time = int(time.time())
         minute_key = f"rate_limit:{identifier}:{current_time // 60}"
         violation_key = f"violations:{identifier}"

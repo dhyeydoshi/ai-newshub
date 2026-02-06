@@ -1,7 +1,3 @@
-"""
-Authentication Service
-Handles user registration, login, password reset, and session management
-"""
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
@@ -29,19 +25,6 @@ class AuthService:
         user_data: UserRegister,
         db: AsyncSession
     ) -> Tuple[User, str]:
-        """
-        Register a new user
-
-        Args:
-            user_data: User registration data
-            db: Database session
-
-        Returns:
-            Tuple of (User, verification_token)
-
-        Raises:
-            HTTPException: If registration fails
-        """
         # Check if user already exists
         result = await db.execute(
             select(User).where(
@@ -126,19 +109,6 @@ class AuthService:
         token: str,
         db: AsyncSession
     ) -> User:
-        """
-        Verify user email with token
-
-        Args:
-            token: Verification token
-            db: Database session
-
-        Returns:
-            Verified user
-
-        Raises:
-            HTTPException: If verification fails
-        """
         result = await db.execute(
             select(User).where(
                 and_(
@@ -181,20 +151,6 @@ class AuthService:
         request: Request,
         db: AsyncSession
     ) -> Tuple[User, str, str, dict]:
-        """
-        Authenticate user and create session
-
-        Args:
-            login_data: Login credentials
-            request: HTTP request for IP/user-agent
-            db: Database session
-
-        Returns:
-            Tuple of (User, access_token, refresh_token, cookie_config)
-
-        Raises:
-            HTTPException: If login fails
-        """
         # Get user
         result = await db.execute(
             select(User).where(User.email == login_data.email)
@@ -363,19 +319,6 @@ class AuthService:
         refresh_token: str,
         db: AsyncSession
     ) -> Tuple[str, str]:
-        """
-        Refresh access token using refresh token
-
-        Args:
-            refresh_token: Current refresh token
-            db: Database session
-
-        Returns:
-            Tuple of (new_access_token, new_refresh_token)
-
-        Raises:
-            HTTPException: If refresh fails
-        """
         # Decode refresh token
         payload = jwt_manager.decode_token(refresh_token)
         jwt_manager.validate_token_type(payload, "refresh")
@@ -459,16 +402,6 @@ class AuthService:
         email: str,
         db: AsyncSession
     ) -> bool:
-        """
-        Send password reset email
-
-        Args:
-            email: User email
-            db: Database session
-
-        Returns:
-            True (always, to prevent user enumeration)
-        """
         result = await db.execute(
             select(User).where(User.email == email)
         )
@@ -498,26 +431,70 @@ class AuthService:
         # Always return True to prevent user enumeration
         return True
 
+    async def change_password(
+        self,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        db: AsyncSession
+    ) -> User:
+        result = await db.execute(
+            select(User).where(
+                and_(
+                    User.user_id == user_id,
+                    User.is_active == True
+                )
+            )
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if not pwd_hasher.verify_password(current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect"
+            )
+
+        if current_password == new_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be different from current password"
+            )
+
+        user_inputs = [user.email, user.username]
+        if user.full_name:
+            user_inputs.append(user.full_name)
+
+        strength = password_validator.validate_password_strength(
+            new_password,
+            user_inputs=user_inputs
+        )
+        if not strength['valid']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Password too weak: {strength['feedback']}"
+            )
+
+        user.password_hash = pwd_hasher.hash_password(new_password)
+        user.last_password_change = datetime.now(timezone.utc)
+
+        await db.commit()
+        await db.refresh(user)
+
+        logger.info(f"Password changed for user: {user.username}")
+        return user
+
     async def reset_password(
         self,
         token: str,
         new_password: str,
         db: AsyncSession
     ) -> User:
-        """
-        Reset password with token
-
-        Args:
-            token: Reset token
-            new_password: New password
-            db: Database session
-
-        Returns:
-            User with reset password
-
-        Raises:
-            HTTPException: If reset fails
-        """
         result = await db.execute(
             select(User).where(User.reset_token == token)
         )

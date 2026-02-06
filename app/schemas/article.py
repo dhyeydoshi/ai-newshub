@@ -1,17 +1,9 @@
-"""
-Article Schemas with Security Validation
-Complete Pydantic schemas for articles, summaries, and news responses
-"""
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
-import html
 from uuid import UUID
+from app.core.sanitizer import ContentSanitizer
 
-
-# ============================================================================
-# Article Schemas
-# ============================================================================
 
 class ArticleBase(BaseModel):
     """Base article schema"""
@@ -29,17 +21,16 @@ class ArticleBase(BaseModel):
     @field_validator("title", "content", "description")
     @classmethod
     def sanitize_html(cls, v: Optional[str]) -> Optional[str]:
-        """Sanitize HTML to prevent XSS"""
+        """Sanitize to plain text so API never returns raw HTML tags."""
         if v is None:
             return v
-        # Escape HTML entities
-        return html.escape(v).strip()
+        return ContentSanitizer.sanitize_text(v)
 
     @field_validator("topics", "tags")
     @classmethod
     def validate_lists(cls, v: List[str]) -> List[str]:
         """Validate and sanitize list items"""
-        return [html.escape(item).strip()[:50] for item in v if item.strip()]
+        return [ContentSanitizer.sanitize_text(item, max_length=50) for item in v if item.strip()]
 
 
 class ArticleResponse(ArticleBase):
@@ -92,10 +83,10 @@ class ArticleResponse(ArticleBase):
     @field_validator("title", "content", "description", mode='after')
     @classmethod
     def sanitize_html(cls, v: Optional[str]) -> Optional[str]:
-        """Sanitize HTML to prevent XSS"""
+        """Sanitize to plain text so API never returns raw HTML tags."""
         if v is None:
             return v
-        return html.escape(v).strip()
+        return ContentSanitizer.sanitize_text(v)
 
 
     model_config = ConfigDict(from_attributes=True)
@@ -117,10 +108,6 @@ class ArticleDetailResponse(ArticleResponse):
     related_articles: List[ArticleResponse] = Field(default_factory=list, max_length=5)
 
 
-# ============================================================================
-# Summary Schemas
-# ============================================================================
-
 class SummaryRequest(BaseModel):
     """Article summary generation request"""
     article_id: Optional[UUID] = None
@@ -136,7 +123,7 @@ class SummaryRequest(BaseModel):
         """Sanitize input text"""
         if v is None:
             return v
-        return html.escape(v).strip()
+        return ContentSanitizer.sanitize_text(v)
 
     def model_post_init(self, __context):
         """Validate that at least one input is provided"""
@@ -155,10 +142,6 @@ class SummaryResponse(BaseModel):
     generated_at: datetime
     model_used: str
 
-
-# ============================================================================
-# News Feed Schemas
-# ============================================================================
 
 class NewsQuery(BaseModel):
     """News query parameters"""
@@ -179,7 +162,7 @@ class NewsQuery(BaseModel):
         """Sanitize query strings"""
         if v is None:
             return v
-        return html.escape(v).strip()
+        return ContentSanitizer.sanitize_text(v, max_length=500)
 
 
 class TrendingArticlesResponse(BaseModel):
@@ -197,10 +180,6 @@ class SearchResultsResponse(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
     facets: Dict[str, Any] = Field(default_factory=dict)
 
-
-# ============================================================================
-# Personalization Schemas
-# ============================================================================
 
 class PersonalizedFeedRequest(BaseModel):
     """Personalized feed request"""

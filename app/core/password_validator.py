@@ -1,6 +1,3 @@
-"""
-Password Strength Validation using zxcvbn
-"""
 from zxcvbn import zxcvbn
 import re
 from typing import Dict, List
@@ -12,16 +9,6 @@ class PasswordValidator:
 
     @staticmethod
     def validate_password_strength(password: str, user_inputs: List[str] = None) -> Dict:
-        """
-        Validate password strength using zxcvbn
-
-        Args:
-            password: Password to validate
-            user_inputs: List of user-specific inputs (email, name, etc.)
-
-        Returns:
-            Dict with validation results
-        """
         # Basic length check
         if len(password) < settings.PASSWORD_MIN_LENGTH:
             return {

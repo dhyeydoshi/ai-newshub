@@ -1,7 +1,4 @@
-﻿"""Authentication Utilities
-Handles authentication state and token management
-"""
-from typing import Optional
+﻿from typing import Optional
 import streamlit as st
 from services.api_service import api_service
 

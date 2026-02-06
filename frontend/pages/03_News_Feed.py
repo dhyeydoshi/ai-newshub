@@ -1,4 +1,5 @@
-﻿import streamlit as st
+﻿import time
+import streamlit as st
 from services.api_service import api_service
 from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
@@ -21,6 +22,7 @@ st.session_state.setdefault("feed_page", 1)
 st.session_state.setdefault("feed_articles", [])
 st.session_state.setdefault("selected_topics", [])
 st.session_state.setdefault("feed_type", "personalized")
+st.session_state.setdefault("rss_synced_topics_key", "")
 
 
 def _extract_recommendations(data):
@@ -192,9 +194,40 @@ def show_latest_feed() -> None:
     st.markdown("### Latest News")
     st.caption("Fresh articles from all sources")
 
+    topics = [t.lower() for t in st.session_state.selected_topics]
+    topic_key = ",".join(sorted(set(topics))) if topics else ""
+    if not topic_key:
+        st.session_state.rss_synced_topics_key = ""
+
+    # Sync topic-specific RSS feeds once whenever topic selection changes.
+    if topic_key and topic_key != st.session_state.get("rss_synced_topics_key", ""):
+        with show_loading("Fetching RSS feeds for selected topics..."):
+            sync_result = api_service.trigger_news_fetch(
+                queries=topics,
+                sources=["rss"],
+                limit=max(config.ARTICLES_PER_PAGE * 2, 20),
+            )
+
+            if sync_result["success"]:
+                task_id = sync_result["data"].get("task_id")
+                if task_id:
+                    for _ in range(20):
+                        status_result = api_service.get_task_status(task_id)
+                        if not status_result["success"]:
+                            break
+                        task_status = status_result.get("data", {}).get("status")
+                        if task_status in {"SUCCESS", "FAILURE", "REVOKED"}:
+                            break
+                        time.sleep(1)
+            else:
+                show_error(f"Failed to fetch topic RSS feeds: {sync_result.get('error')}")
+
+        st.session_state.rss_synced_topics_key = topic_key
+        st.session_state.feed_page = 1
+        st.session_state.feed_articles = []
+
     if not st.session_state.feed_articles or st.session_state.feed_page == 1:
         with show_loading("Loading latest news..."):
-            topics = [t.lower() for t in st.session_state.selected_topics]
             result = api_service.get_latest_news(
                 page=st.session_state.feed_page,
                 limit=config.ARTICLES_PER_PAGE,
@@ -220,7 +253,6 @@ def show_latest_feed() -> None:
             if st.button("Load More", use_container_width=True):
                 st.session_state.feed_page += 1
                 with show_loading("Loading more articles..."):
-                    topics = [t.lower() for t in st.session_state.selected_topics]
                     result = api_service.get_latest_news(
                         page=st.session_state.feed_page,
                         limit=config.ARTICLES_PER_PAGE,
@@ -234,7 +266,6 @@ def show_latest_feed() -> None:
                     st.rerun()
     else:
         st.info("No articles available")
-
 
 def show_search_results() -> None:
     """Display search results"""

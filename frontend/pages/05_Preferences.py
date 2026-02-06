@@ -37,9 +37,6 @@ def main() -> None:
 
     tab1, tab2, tab3 = st.tabs(["Topic Preferences", "Learned Interests", "Settings"])
 
-    # ====================================================================
-    # TOPIC PREFERENCES
-    # ====================================================================
     with tab1:
         st.markdown("### Select Your Interests")
         st.caption("Choose topics you want to see more of in your feed")
@@ -104,9 +101,6 @@ def main() -> None:
                 else:
                     show_error(f"Failed to save: {update_result.get('error')}")
 
-    # ====================================================================
-    # LEARNED INTERESTS
-    # ====================================================================
     with tab2:
         st.markdown("### What We've Learned About You")
         st.caption("These are topics inferred from your reading behavior")
@@ -157,9 +151,6 @@ def main() -> None:
                 "No learned preferences yet. Start reading articles to help us understand your interests!"
             )
 
-    # ====================================================================
-    # SETTINGS
-    # ====================================================================
     with tab3:
         st.markdown("### Notification & Display Settings")
 

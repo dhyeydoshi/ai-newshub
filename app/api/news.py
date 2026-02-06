@@ -1,7 +1,3 @@
-"""
-News Aggregation API Endpoints
-Provides endpoints for fetching and aggregating news from multiple sources
-"""
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -10,6 +6,7 @@ import redis.asyncio as aioredis
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
+from app.core.sanitizer import ContentSanitizer
 from app.services.article_persistence import article_persistence_service
 
 
@@ -21,16 +18,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/news", tags=["News Aggregation"])
 
 
-# ============================================================================
-# REQUEST/RESPONSE MODELS
-# ============================================================================
-
 class NewsQuery(BaseModel):
     """News aggregation query parameters"""
     query: Optional[str] = Field(None, max_length=500, description="Search query")
     sources: Optional[List[str]] = Field(
         None,
         description="List of sources to fetch from (newsapi, gdelt, rss)"
+    )
+    topics: Optional[List[str]] = Field(
+        None,
+        description="Topic filters used for topic-specific RSS feed selection",
     )
     limit: int = Field(20, ge=1, le=100, description="Maximum number of articles")
     deduplicate: bool = Field(True, description="Remove duplicate articles")
@@ -77,6 +74,13 @@ class ArticleResponse(BaseModel):
     content_hash: Optional[str] = None
     metadata: Optional[dict] = None
 
+    @field_validator("title", "content", "description", mode="before")
+    @classmethod
+    def sanitize_text_fields(cls, v):
+        if v is None:
+            return v
+        return ContentSanitizer.sanitize_text(str(v))
+
     @field_validator("published_date", mode="before")
     @classmethod
     def convert_datetime_to_string(cls, v):
@@ -97,12 +101,13 @@ class NewsResponse(BaseModel):
     cached: bool = False
 
 
-# ============================================================================
-# DEPENDENCY INJECTION
-# ============================================================================
-
 async def get_redis_client() -> aioredis.Redis:
-    """Get Redis client for news aggregation"""
+    """Get Redis client for news aggregation - reuses the global application-level client."""
+    from main import redis_client
+    if redis_client:
+        return redis_client
+
+    # Fallback: create a new connection if global client is unavailable
     try:
         redis = aioredis.from_url(
             settings.REDIS_URL,
@@ -117,9 +122,6 @@ async def get_redis_client() -> aioredis.Redis:
         raise HTTPException(status_code=503, detail="Cache service unavailable")
 
 
-
-
-
 async def get_aggregator_service(
     redis: aioredis.Redis = Depends(get_redis_client)
 ) -> NewsAggregatorService:
@@ -129,10 +131,6 @@ async def get_aggregator_service(
         newsapi_key=settings.NEWSAPI_KEY
     )
 
-
-# ============================================================================
-# API ENDPOINTS
-# ============================================================================
 
 @router.get("/aggregate", response_model=NewsResponse)
 async def aggregate_news(
@@ -144,6 +142,7 @@ async def aggregate_news(
     limit: int = Query(20, ge=1, le=100, description="Max articles"),
     deduplicate: bool = Query(True, description="Remove duplicates"),
     use_cache: bool = Query(True, description="Use cache"),
+    topics: Optional[List[str]] = Query(None, description="Topic filters used to select topic-specific RSS feeds"),
     category: Optional[str] = Query(None, description="Category for NewsAPI"),
     language: str = Query("en", max_length=2, description="Language code"),
     aggregator: NewsAggregatorService = Depends(get_aggregator_service),
@@ -152,20 +151,6 @@ async def aggregate_news(
 
 
 ):
-    """
-    Aggregate news from multiple sources
-
-    This endpoint fetches news articles from various sources (NewsAPI, GDELT, RSS)
-    and returns deduplicated, sanitized results with 15-minute caching.
-
-    **Features:**
-    - Multi-source aggregation
-    - Content deduplication (80% similarity threshold)
-    - XSS prevention and content sanitization
-    - Circuit breaker pattern for API failures
-    - Exponential backoff retry logic
-    - Redis caching (15-minute TTL)
-    """
     try:
         # Parse sources
         source_list = None
@@ -183,7 +168,9 @@ async def aggregate_news(
             if settings.ENABLE_RSS_FEEDS and "rss" not in source_list:
                 source_list.append("rss")
 
-        feed_urls = settings.RSS_FEED_URLS if "rss" in source_list and settings.RSS_FEED_URLS else None
+        feed_urls = None
+        if "rss" in source_list and settings.ENABLE_RSS_FEEDS:
+            feed_urls = settings.get_rss_feed_urls_for_topics(topics)
 
         # Fetch articles
         articles = await aggregator.aggregate_news(
@@ -192,6 +179,7 @@ async def aggregate_news(
             limit=limit,
             deduplicate=deduplicate,
             use_cache=use_cache,
+            topics=topics,
             category=category,
             language=language,
             feed_urls=feed_urls
@@ -218,8 +206,8 @@ async def aggregate_news(
         )
 
     except Exception as e:
-        logger.error(f"Error aggregating news: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to aggregate news: {str(e)}")
+        logger.error(f"Error aggregating news: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to aggregate news")
 
 
 @router.post("/rss/fetch", response_model=NewsResponse)
@@ -227,17 +215,6 @@ async def fetch_rss_feeds(
     query: RSSFeedQuery,
     aggregator: NewsAggregatorService = Depends(get_aggregator_service)
 ):
-    """
-    Fetch articles from multiple RSS feeds
-
-    This endpoint allows you to fetch news from custom RSS feed URLs
-    with automatic content sanitization and deduplication.
-
-    **Example RSS feeds:**
-    - BBC News: http://feeds.bbci.co.uk/news/rss.xml
-    - CNN: http://rss.cnn.com/rss/edition.rss
-    - Reuters: http://feeds.reuters.com/reuters/topNews
-    """
     try:
         articles = await aggregator.fetch_from_rss_feeds(
             feed_urls=query.feed_urls,
@@ -253,17 +230,12 @@ async def fetch_rss_feeds(
         )
 
     except Exception as e:
-        logger.error(f"Error fetching RSS feeds: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch RSS feeds: {str(e)}")
+        logger.error(f"Error fetching RSS feeds: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch RSS feeds")
 
 
 @router.get("/sources")
 async def get_available_sources():
-    """
-    Get list of available news sources
-
-    Returns information about supported news aggregation sources
-    """
     return {
         "sources": [
             {
@@ -301,11 +273,6 @@ async def get_available_sources():
 async def health_check(
     redis: aioredis.Redis = Depends(get_redis_client)
 ):
-    """
-    Check health of news aggregation service
-
-    Verifies Redis connection and service availability
-    """
     try:
         # Check Redis
         await redis.ping()

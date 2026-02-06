@@ -5,10 +5,6 @@ from uuid import UUID
 import html
 
 
-# ============================================================================
-# Profile Schemas
-# ============================================================================
-
 class UserProfileResponse(BaseModel):
     """User profile response"""
     user_id: UUID
@@ -39,10 +35,6 @@ class UserProfileUpdate(BaseModel):
             return v
         return html.escape(v).strip()
 
-
-# ============================================================================
-# Preferences Schemas
-# ============================================================================
 
 class TopicPreference(BaseModel):
     """Topic preference item"""
@@ -100,10 +92,6 @@ class UserPreferencesUpdate(BaseModel):
         return [html.escape(item).strip()[:100] for item in v if item.strip()]
 
 
-# ============================================================================
-# Analytics Schemas
-# ============================================================================
-
 class UserEngagementStats(BaseModel):
     """User engagement statistics"""
     total_articles_viewed: int
@@ -133,10 +121,6 @@ class ReadingHistoryResponse(BaseModel):
     page_size: int
     items: List[ReadingHistoryItem]
 
-
-# ============================================================================
-# Account Management Schemas
-# ============================================================================
 
 class AccountDeletionRequest(BaseModel):
     """Account deletion request"""

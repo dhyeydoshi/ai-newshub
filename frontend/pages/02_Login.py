@@ -62,9 +62,6 @@ def main() -> None:
     # Tabs for Login and Register
     tab1, tab2 = st.tabs(["Login", "Register"])
 
-    # ====================================================================
-    # LOGIN TAB
-    # ====================================================================
     with tab1:
         st.markdown("### Welcome Back!")
         st.caption("Enter your credentials to access your personalized news feed")
@@ -115,9 +112,6 @@ def main() -> None:
             if st.button("Create Account", use_container_width=True):
                 st.info("Switch to the Register tab above!")
 
-    # ====================================================================
-    # REGISTER TAB
-    # ====================================================================
     with tab2:
         st.markdown("### Create Your Account")
         st.caption("Join thousands of users getting personalized news recommendations")

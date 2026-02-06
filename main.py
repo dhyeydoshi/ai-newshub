@@ -1,8 +1,5 @@
-﻿"""
-News Summarizer API - Main Application Entry Point
-Complete FastAPI app with comprehensive security middleware
-"""
-from contextlib import asynccontextmanager
+﻿from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -69,8 +66,6 @@ async def lifespan(app: FastAPI):
     # Initialize database tables (if needed)
     try:
         from app.core.database import init_db
-        # Uncomment to auto-create tables on startup
-        # await init_db()
         logger.info("Database ready")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
@@ -81,6 +76,23 @@ async def lifespan(app: FastAPI):
             "News fetching is handled by Celery worker. "
             "Start worker with: celery -A app.celery_config:celery_app worker --beat --loglevel=info"
         )
+        try:
+            from app.utils.celery_helpers import get_celery_status
+
+            celery_status = await asyncio.wait_for(get_celery_status(), timeout=5)
+            active_workers = celery_status.get("workers", {}).get("active", 0)
+
+            if active_workers == 0:
+                logger.warning(
+                    "Celery health warning: ENABLE_NEWS_SCHEDULER=true but 0 active Celery workers detected. "
+                    "News ingestion tasks (NewsAPI/GDELT/RSS) will not run until a worker is started."
+                )
+            else:
+                logger.info(f"Celery worker health OK: {active_workers} active worker(s)")
+        except asyncio.TimeoutError:
+            logger.warning("Celery health check timed out during startup")
+        except Exception as e:
+            logger.warning(f"Unable to verify Celery worker health at startup: {e}")
 
     logger.info("Application startup complete")
 
@@ -130,10 +142,6 @@ app = FastAPI(
 )
 
 
-# ============================================================================
-# MIDDLEWARE CONFIGURATION (Order matters!)
-# ============================================================================
-
 # 1. CORS Middleware (must be first to handle preflight)
 app.add_middleware(
     CORSMiddleware,
@@ -150,19 +158,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 # 3. Request Validation Middleware
 app.add_middleware(RequestValidationMiddleware)
 
-# 4. Rate Limiting Middleware - OPTIMIZED: Now BEFORE authentication
-# This blocks malicious traffic before expensive JWT validation
-# Will be initialized with Redis client after startup
-_rate_limit_middleware = None
-
-# 5. Authentication Middleware (validates JWT tokens)
-# OPTIMIZED: Now comes AFTER rate limiting
 app.add_middleware(AuthenticationMiddleware)
 
-
-# ============================================================================
-# EXCEPTION HANDLERS
-# ============================================================================
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -211,10 +208,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
-
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
 
 # Import API routers
 from app.api import include_routers
@@ -265,9 +258,6 @@ async def health_check():
 
 @app.get("/api/v1/status")
 async def api_status():
-    """
-    API status endpoint with service health checks
-    """
     status_data = {
         "api": "operational",
         "timestamp": datetime.now(timezone.utc).isoformat(),

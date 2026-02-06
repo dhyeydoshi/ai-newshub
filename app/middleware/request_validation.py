@@ -1,7 +1,3 @@
-"""
-Request Validation Middleware
-Validates request size, content type, and logs requests safely
-"""
 import time
 import json
 from typing import Set
@@ -15,12 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class RequestValidationMiddleware(BaseHTTPMiddleware):
-    """
-    Validates incoming requests for security
-    - Size limits
-    - Content-type validation
-    - Request logging without sensitive data
-    """
 
     # Sensitive headers to exclude from logs
     SENSITIVE_HEADERS: Set[str] = {

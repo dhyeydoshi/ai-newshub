@@ -1,17 +1,12 @@
-"""
-News Aggregation Service
-Complete implementation with multiple sources, caching, and security
-"""
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Set, Union
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timezone
 import asyncio
 import hashlib
 import re
-from urllib.parse import urlparse
+import json
 import httpx
 import feedparser
-from bs4 import BeautifulSoup
 import redis.asyncio as aioredis
 from tenacity import (
     retry,
@@ -20,20 +15,33 @@ from tenacity import (
     retry_if_exception_type
 )
 import logging
-import json
 
+from app.schemas.raw_article import RawArticle
 from app.utils.date_parser import parse_iso_date, parse_gdelt_date, parse_rss_date
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# CIRCUIT BREAKER PATTERN
-# ============================================================================
+def _normalize_topic_values(values: Optional[List[str]]) -> List[str]:
+    """Normalize topic values for consistent persistence and filtering."""
+    if not values:
+        return []
+
+    normalized: List[str] = []
+    seen = set()
+    for value in values:
+        topic = str(value or "").strip().lower()
+        if not topic or topic in seen:
+            continue
+        seen.add(topic)
+        normalized.append(topic[:100])
+    return normalized
+
 
 class CircuitBreaker:
-    """Circuit breaker pattern implementation for API failures"""
-    
+    """Circuit breaker for API failure handling."""
+
     def __init__(
         self,
         failure_threshold: int = 5,
@@ -45,34 +53,17 @@ class CircuitBreaker:
         self.expected_exception = expected_exception
         self.failure_count = 0
         self.last_failure_time: Optional[datetime] = None
-        self.state = "closed"  # closed, open, half-open
-    
-    def call(self, func, *args, **kwargs):
-        """Execute function with circuit breaker protection"""
-        if self.state == "open":
-            if self._should_attempt_reset():
-                self.state = "half-open"
-                logger.info(f"Circuit breaker half-open for {func.__name__}")
-            else:
-                raise Exception(f"Circuit breaker is OPEN for {func.__name__}")
-        
-        try:
-            result = func(*args, **kwargs)
-            self._on_success()
-            return result
-        except self.expected_exception as e:
-            self._on_failure()
-            raise e
-    
+        self.state = "closed"
+
     async def async_call(self, func, *args, **kwargs):
-        """Async version of circuit breaker call"""
+        """Execute async function with circuit breaker protection."""
         if self.state == "open":
             if self._should_attempt_reset():
                 self.state = "half-open"
                 logger.info(f"Circuit breaker half-open for {func.__name__}")
             else:
-                raise Exception(f"Circuit breaker is OPEN for {func.__name__}")
-        
+                raise Exception(f"Circuit breaker OPEN for {func.__name__}")
+
         try:
             result = await func(*args, **kwargs)
             self._on_success()
@@ -80,664 +71,411 @@ class CircuitBreaker:
         except self.expected_exception as e:
             self._on_failure()
             raise e
-    
+
     def _on_success(self):
-        """Reset on successful call"""
         self.failure_count = 0
         self.state = "closed"
-    
+
     def _on_failure(self):
-        """Increment failure count and open if threshold reached"""
         self.failure_count += 1
         self.last_failure_time = datetime.now(timezone.utc)
-        
         if self.failure_count >= self.failure_threshold:
             self.state = "open"
             logger.error(f"Circuit breaker OPENED after {self.failure_count} failures")
-    
+
     def _should_attempt_reset(self) -> bool:
-        """Check if enough time has passed to attempt reset"""
         if not self.last_failure_time:
             return True
-        
-        time_since_failure = (datetime.now(timezone.utc) - self.last_failure_time).total_seconds()
-        return time_since_failure >= self.timeout
+        elapsed = (datetime.now(timezone.utc) - self.last_failure_time).total_seconds()
+        return elapsed >= self.timeout
 
-
-# ============================================================================
-# CONTENT SANITIZER
-# ============================================================================
-
-class ContentSanitizer:
-    """Sanitize and validate content from external sources"""
-    
-    # Dangerous HTML tags and attributes
-    DANGEROUS_TAGS = {
-        'script', 'iframe', 'object', 'embed', 'link', 'style',
-        'meta', 'base', 'form', 'input', 'button'
-    }
-    
-    DANGEROUS_ATTRIBUTES = {
-        'onclick', 'onload', 'onerror', 'onmouseover', 'onmouseout',
-        'onfocus', 'onblur', 'onchange', 'onsubmit'
-    }
-
-    ALLOWED_TAGS = {
-        'p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'ul', 'ol', 'li', 'blockquote', 'a', 'img', 'div', 'span', 'pre', 'html', 'body'
-    }
-
-    ALLOWED_ATTRIBUTES = {
-        'href', 'src', 'alt', 'title', 'class'
-    }
-
-    @classmethod
-    def sanitize_html(cls, html: str) -> str:
-        """Remove dangerous HTML tags and attributes"""
-        if not html:
-            return ""
-        
-        try:
-            soup = BeautifulSoup(html, 'lxml')
-
-            # Remove dangerous and unknown tags, clean attributes for allowed tags
-            for tag in soup.find_all():
-                if tag.name in cls.DANGEROUS_TAGS or tag.name not in cls.ALLOWED_TAGS:
-                    tag.decompose()
-                    continue
-
-                # Remove dangerous attributes
-                attrs_to_remove = []
-                for attr in tag.attrs:
-                    if attr.lower() in cls.DANGEROUS_ATTRIBUTES:
-                        attrs_to_remove.append(attr)
-                    elif attr.lower().startswith('on'):  # All event handlers
-                        attrs_to_remove.append(attr)
-
-                for attr in attrs_to_remove:
-                    del tag[attr]
-
-                # Sanitize href and src attributes
-                if 'href' in tag.attrs:
-                    tag['href'] = cls._sanitize_url(tag['href'])
-                if 'src' in tag.attrs:
-                    tag['src'] = cls._sanitize_url(tag['src'])
-            
-            return str(soup)
-        except Exception as e:
-            logger.error(f"Error sanitizing HTML: {e}")
-            return BeautifulSoup(html, 'html.parser').get_text()
-    
-    @classmethod
-    def sanitize_text(cls, text: str) -> str:
-        """Remove any HTML/script content from text"""
-        if not text:
-            return ""
-        
-        # Remove HTML tags
-        text = BeautifulSoup(text, 'html.parser').get_text()
-        
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        return text
-    
-    @classmethod
-    def _sanitize_url(cls, url: str) -> str:
-        """Validate and sanitize URLs"""
-        if not url:
-            return ""
-        
-        # Remove javascript: and data: URLs
-        if url.lower().startswith(('javascript:', 'data:', 'vbscript:')):
-            return ""
-        
-        # Validate URL format
-        try:
-            parsed = urlparse(url)
-            if parsed.scheme not in ['http', 'https', '']:
-                return ""
-            return url
-        except Exception:
-            return ""
-    
-    @classmethod
-    def validate_article_data(cls, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate and sanitize article data"""
-        validated = {}
-        
-        # Required fields
-        validated['title'] = cls.sanitize_text(data.get('title', ''))[:500]
-        validated['content'] = cls.sanitize_html(data.get('content', ''))[:50000]
-        validated['url'] = cls._sanitize_url(data.get('url', ''))[:2048]
-        
-        # Optional fields
-        if 'description' in data:
-            validated['description'] = cls.sanitize_text(data.get('description', ''))[:1000]
-        
-        if 'author' in data:
-            validated['author'] = cls.sanitize_text(data.get('author', ''))[:255]
-        
-        if 'source' in data:
-            validated['source'] = cls.sanitize_text(data.get('source', ''))[:255]
-        
-        if 'published_date' in data:
-            validated['published_date'] = data.get('published_date')
-        
-        if 'image_url' in data:
-            validated['image_url'] = cls._sanitize_url(data.get('image_url', ''))[:2048]
-        
-        # Validate required fields are not empty
-        if not validated['title'] or not validated['url']:
-            raise ValueError("Article must have title and URL")
-        
-        return validated
-
-
-# ============================================================================
-# DEDUPLICATION ALGORITHM
-# ============================================================================
 
 class ArticleDeduplicator:
-    """Deduplicate articles using content similarity"""
-    
+    """Deduplicate articles using content hash and similarity."""
+
     @staticmethod
     def generate_content_hash(content: str) -> str:
-        """Generate hash for content deduplication"""
-        # Normalize content
+        """Generate SHA-256 hash for deduplication."""
         normalized = re.sub(r'\s+', ' ', content.lower().strip())
-        # Generate SHA-256 hash
         return hashlib.sha256(normalized.encode()).hexdigest()
-    
+
     @staticmethod
     def calculate_similarity(text1: str, text2: str) -> float:
-        """Calculate Jaccard similarity between two texts"""
+        """Calculate Jaccard similarity between two texts."""
         if not text1 or not text2:
             return 0.0
-        
-        # Tokenize and create sets
         words1 = set(re.findall(r'\w+', text1.lower()))
         words2 = set(re.findall(r'\w+', text2.lower()))
-        
         if not words1 or not words2:
             return 0.0
-        
-        # Jaccard similarity
         intersection = len(words1 & words2)
         union = len(words1 | words2)
-        
         return intersection / union if union > 0 else 0.0
-    
+
     @classmethod
-    def deduplicate_articles(
+    def deduplicate(
         cls,
-        articles: List[Dict[str, Any]],
+        articles: List[RawArticle],
         similarity_threshold: float = 0.8
-    ) -> List[Dict[str, Any]]:
-        """Remove duplicate articles based on content similarity"""
+    ) -> List[RawArticle]:
+        """Remove duplicate articles based on content hash and similarity."""
         if not articles:
             return []
-        
-        unique_articles = []
+
+        unique: List[RawArticle] = []
         seen_hashes: Set[str] = set()
-        
+
         for article in articles:
-            # Generate content hash
-            content = article.get('content', '') or article.get('description', '')
-            content_hash = cls.generate_content_hash(content)
-            
-            # Check if exact duplicate
-            if content_hash in seen_hashes:
-                logger.debug(f"Skipping duplicate article: {article.get('title', 'Unknown')}")
+            # Check exact hash match
+            if article.content_hash in seen_hashes:
+                logger.debug(f"Skipping duplicate (hash): {article.title[:50]}")
                 continue
-            
+
             # Check similarity with existing articles
             is_duplicate = False
-            for existing in unique_articles:
-                existing_content = existing.get('content', '') or existing.get('description', '')
-                similarity = cls.calculate_similarity(content, existing_content)
-                
-                if similarity >= similarity_threshold:
-                    logger.debug(
-                        f"Skipping similar article (similarity: {similarity:.2f}): "
-                        f"{article.get('title', 'Unknown')}"
-                    )
+            article_text = article.content or article.description or ""
+            
+            for existing in unique:
+                existing_text = existing.content or existing.description or ""
+                if cls.calculate_similarity(article_text, existing_text) >= similarity_threshold:
+                    logger.debug(f"Skipping duplicate (similar): {article.title[:50]}")
                     is_duplicate = True
                     break
-            
+
             if not is_duplicate:
-                seen_hashes.add(content_hash)
-                article['content_hash'] = content_hash
-                unique_articles.append(article)
-        
-        logger.info(f"Deduplicated {len(articles)} articles to {len(unique_articles)} unique articles")
-        return unique_articles
+                seen_hashes.add(article.content_hash)
+                unique.append(article)
 
+        logger.info(f"Deduplicated {len(articles)} → {len(unique)} articles")
+        return unique
 
-# ============================================================================
-# BASE FETCHER ABSTRACT CLASS
-# ============================================================================
 
 class BaseFetcher(ABC):
-    """Abstract base class for news fetchers"""
-    
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        timeout: int = 5,
-        max_retries: int = 3
-    ):
+    """Abstract base class for news fetchers."""
+
+    def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
         self.api_key = api_key
         self.timeout = timeout
-        self.max_retries = max_retries
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
-        self.sanitizer = ContentSanitizer()
-    
+
     @abstractmethod
-    async def fetch_articles(
-        self,
-        query: Optional[str] = None,
-        limit: int = 20,
-        **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch articles from source"""
+    async def fetch(self, query: Optional[str] = None, limit: int = 20, **kwargs) -> List[RawArticle]:
+        """Fetch articles from source. Returns list of validated RawArticle objects."""
         pass
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError))
     )
-    async def _make_request(
+    async def _request(
         self,
         url: str,
         params: Optional[Dict] = None,
         headers: Optional[Dict] = None
     ) -> httpx.Response:
-        """Make HTTP request with retry logic"""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        """Make HTTP request with retry logic."""
+        async with httpx.AsyncClient(
+            timeout=self.timeout,
+            trust_env=settings.HTTP_CLIENT_TRUST_ENV,
+            follow_redirects=settings.HTTP_CLIENT_FOLLOW_REDIRECTS
+        ) as client:
             response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             return response
-    
-    def _validate_and_sanitize(self, article: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Validate and sanitize article data"""
+
+    def _to_article(self, data: Dict[str, Any]) -> Optional[RawArticle]:
+        """Validate dict to RawArticle, returning None on validation failure."""
         try:
-            return self.sanitizer.validate_article_data(article)
-        except ValueError as e:
-            logger.warning(f"Invalid article data: {e}")
+            return RawArticle.model_validate(data)
+        except Exception as e:
+            logger.debug(f"Article validation failed: {e}")
             return None
 
 
-# ============================================================================
-# NEWSAPI FETCHER
-# ============================================================================
-
 class NewsAPIFetcher(BaseFetcher):
     """Fetch news from NewsAPI.org"""
-    
+
     BASE_URL = "https://newsapi.org/v2"
-    
-    async def fetch_articles(
+
+    async def fetch(
         self,
         query: Optional[str] = None,
         limit: int = 20,
         category: Optional[str] = None,
         language: str = "en",
         **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch articles from NewsAPI"""
+    ) -> List[RawArticle]:
         if not self.api_key:
             logger.warning("NewsAPI key not configured")
             return []
-        
+
         try:
-            # Build parameters
             params = {
                 'apiKey': self.api_key,
                 'pageSize': min(limit, 100),
                 'language': language
             }
-            
-            # Use top-headlines or everything endpoint
+
+            endpoint = f"{self.BASE_URL}/top-headlines" if category else f"{self.BASE_URL}/everything"
             if category:
-                endpoint = f"{self.BASE_URL}/top-headlines"
                 params['category'] = category
             else:
-                endpoint = f"{self.BASE_URL}/everything"
                 params['sortBy'] = 'publishedAt'
-            
             if query:
                 params['q'] = query
-            
-            # Make request with circuit breaker
-            response = await self.circuit_breaker.async_call(
-                self._make_request,
-                endpoint,
-                params=params
-            )
-            
+
+            response = await self.circuit_breaker.async_call(self._request, endpoint, params=params)
             data = response.json()
-            
+
             if data.get('status') != 'ok':
-                logger.error(f"NewsAPI error: {data.get('message', 'Unknown error')}")
+                logger.error(f"NewsAPI error: {data.get('message', 'Unknown')}")
                 return []
-            
-            # Process articles
+
+            topic_hints = _normalize_topic_values(kwargs.get('topic_hints') or [])
+            if category:
+                topic_hints = _normalize_topic_values(topic_hints + [category])
+
             articles = []
             for item in data.get('articles', []):
-                article = self._normalize_newsapi_article(item)
-                validated = self._validate_and_sanitize(article)
-                if validated:
-                    articles.append(validated)
-            
-            logger.info(f"Fetched {len(articles)} articles from NewsAPI")
+                article = self._to_article({
+                    'title': item.get('title', ''),
+                    'content': item.get('content') or item.get('description', ''),
+                    'description': item.get('description', ''),
+                    'url': item.get('url', ''),
+                    'source': item.get('source', {}).get('name', 'NewsAPI'),
+                    'author': item.get('author'),
+                    'published_date': parse_iso_date(item.get('publishedAt')),
+                    'image_url': item.get('urlToImage'),
+                    'language': language,
+                    'topics': topic_hints,
+                    'metadata': {'source_id': item.get('source', {}).get('id', '')}
+                })
+                if article:
+                    articles.append(article)
+
+            logger.info(f"NewsAPI: fetched {len(articles)} articles")
             return articles
-            
+
         except Exception as e:
-            logger.error(f"Error fetching from NewsAPI: {e}")
+            logger.error(f"NewsAPI fetch error: {e}")
             return []
-    
-    def _normalize_newsapi_article(self, item: Dict) -> Dict[str, Any]:
-        """Normalize NewsAPI article format"""
-        return {
-            'title': item.get('title', ''),
-            'content': item.get('content', '') or item.get('description', ''),
-            'description': item.get('description', ''),
-            'url': item.get('url', ''),
-            'source': item.get('source', {}).get('name', 'NewsAPI'),
-            'author': item.get('author', ''),
-            'published_date': parse_iso_date(item.get('publishedAt')),
-            'image_url': item.get('urlToImage', ''),
-            'metadata': {
-                'source_id': item.get('source', {}).get('id', '')
-            }
-        }
-    
-    @staticmethod
-    def _parse_date(date_str: Optional[str]) -> datetime:
-        """Parse ISO date string"""
-        if not date_str:
-            return datetime.now(timezone.utc)
-        try:
-            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        except Exception:
-            return datetime.now(timezone.utc)
 
-
-# ============================================================================
-# GDELT FETCHER
-# ============================================================================
 
 class GDELTFetcher(BaseFetcher):
     """Fetch news from GDELT Project"""
 
     BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-    async def fetch_articles(
+    async def fetch(
         self,
         query: Optional[str] = None,
         limit: int = 20,
         **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch articles from GDELT"""
-        if not query:
-            query = "news"  # Default query
+    ) -> List[RawArticle]:
+        search_query = query or "news"
 
         try:
             params = {
-                'query': query,
+                'query': search_query,
                 'mode': 'artlist',
                 'maxrecords': min(limit, 250),
                 'format': 'json',
                 'sort': 'hybridrel'
             }
 
-            # Make request with circuit breaker
-            response = await self.circuit_breaker.async_call(
-                self._make_request,
-                self.BASE_URL,
-                params=params
-            )
-
+            response = await self.circuit_breaker.async_call(self._request, self.BASE_URL, params=params)
             data = response.json()
 
-            # Process articles
+            topic_hints = _normalize_topic_values(kwargs.get('topic_hints') or [])
+
             articles = []
             for item in data.get('articles', []):
-                article = self._normalize_gdelt_article(item)
-                validated = self._validate_and_sanitize(article)
-                if validated:
-                    articles.append(validated)
+                article = self._to_article({
+                    'title': item.get('title', ''),
+                    'content': item.get('title', ''),  # GDELT doesn't provide full content
+                    'description': item.get('title', ''),
+                    'url': item.get('url', ''),
+                    'source': item.get('domain', 'GDELT'),
+                    'published_date': parse_gdelt_date(item.get('seendate')),
+                    'image_url': item.get('socialimage'),
+                    'topics': topic_hints,
+                    'metadata': {
+                        'language': item.get('language', ''),
+                        'tone': item.get('tone', '')
+                    }
+                })
+                if article:
+                    articles.append(article)
 
-            logger.info(f"Fetched {len(articles)} articles from GDELT")
+            logger.info(f"GDELT: fetched {len(articles)} articles")
             return articles
 
         except Exception as e:
-            logger.error(f"Error fetching from GDELT: {e}")
+            logger.error(f"GDELT fetch error: {e}")
             return []
 
-    def _normalize_gdelt_article(self, item: Dict) -> Dict[str, Any]:
-        """Normalize GDELT article format"""
-        return {
-            'title': item.get('title', ''),
-            'content': item.get('title', ''),  # GDELT doesn't provide full content
-            'description': item.get('title', ''),
-            'url': item.get('url', ''),
-            'source': item.get('domain', 'GDELT'),
-            'author': '',
-            'published_date': parse_gdelt_date(item.get('seendate')),
-            'image_url': item.get('socialimage', ''),
-            'metadata': {
-                'language': item.get('language', ''),
-                'tone': item.get('tone', '')
-            }
-        }
-
-    @staticmethod
-    def _parse_gdelt_date(date_str: Optional[str]) -> datetime:
-        """Parse GDELT date format (YYYYMMDDHHmmSS)"""
-        if not date_str:
-            return datetime.now(timezone.utc)
-        try:
-            return datetime.strptime(date_str, '%Y%m%d%H%M%S').replace(tzinfo=timezone.utc)
-        except Exception:
-            return datetime.now(timezone.utc)
-
-
-# ============================================================================
-# RSS FETCHER
-# ============================================================================
 
 class RSSFetcher(BaseFetcher):
     """Fetch news from RSS feeds"""
 
-    async def fetch_articles(
+    async def fetch(
         self,
         query: Optional[str] = None,
         limit: int = 20,
         feed_url: Optional[str] = None,
         **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch articles from RSS feed"""
-        # feed_url can come from query parameter or kwargs
+    ) -> List[RawArticle]:
         url = feed_url or query
-
         if not url:
             logger.warning("No RSS feed URL provided")
             return []
 
+        topic_hints = _normalize_topic_values(kwargs.get('topic_hints') or [])
+
         try:
-            # Fetch RSS feed
             response = await self.circuit_breaker.async_call(
-                self._make_request,
+                self._request,
                 url,
                 headers={'User-Agent': 'NewsAggregator/1.0'}
             )
 
-            # Parse feed
             feed = feedparser.parse(response.text)
 
-            # Process entries
             articles = []
             for entry in feed.entries[:limit]:
-                article = self._normalize_rss_entry(entry, feed.feed)
-                validated = self._validate_and_sanitize(article)
-                if validated:
-                    articles.append(validated)
+                # Extract content
+                content = ''
+                if hasattr(entry, 'content') and entry.content:
+                    content = entry.content[0].value
+                elif hasattr(entry, 'summary'):
+                    content = entry.summary
+                elif hasattr(entry, 'description'):
+                    content = entry.description
 
-            logger.info(f"Fetched {len(articles)} articles from RSS: {url}")
+                # Extract image
+                image_url = self._extract_image(entry)
+
+                # Extract tags
+                tags = [tag.term for tag in entry.get('tags', [])] if hasattr(entry, 'tags') else []
+                entry_topics = _normalize_topic_values(topic_hints + tags)
+
+                article = self._to_article({
+                    'title': entry.get('title', ''),
+                    'content': content,
+                    'description': entry.get('summary', '')[:500] if entry.get('summary') else '',
+                    'url': entry.get('link', ''),
+                    'source': feed.feed.get('title', 'RSS Feed') if hasattr(feed, 'feed') else 'RSS Feed',
+                    'author': entry.get('author'),
+                    'published_date': parse_rss_date(entry),
+                    'image_url': image_url,
+                    'topics': entry_topics,
+                    'tags': tags
+                })
+                if article:
+                    articles.append(article)
+
+            logger.info(f"RSS ({url[:50]}...): fetched {len(articles)} articles")
             return articles
 
         except Exception as e:
-            logger.error(f"Error fetching RSS feed {url}: {e}")
+            logger.error(f"RSS fetch error ({url}): {e}")
             return []
 
-    def _normalize_rss_entry(self, entry: Any, feed_info: Any) -> Dict[str, Any]:
-        """Normalize RSS entry format"""
-        # Get content
-        content = ''
-        if hasattr(entry, 'content'):
-            content = entry.content[0].value
-        elif hasattr(entry, 'summary'):
-            content = entry.summary
-        elif hasattr(entry, 'description'):
-            content = entry.description
-
-        return {
-            'title': entry.get('title', ''),
-            'content': content,
-            'description': entry.get('summary', '')[:500],
-            'url': entry.get('link', ''),
-            'source': feed_info.get('title', 'RSS Feed'),
-            'author': entry.get('author', ''),
-            'published_date': parse_rss_date(entry),
-            'image_url': self._extract_image_from_entry(entry),
-            'metadata': {
-                'tags': [tag.term for tag in entry.get('tags', [])]
-            }
-        }
-
     @staticmethod
-    def _parse_rss_date(entry: Any) -> datetime:
-        """Parse RSS date"""
-        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-            from time import mktime
-            return datetime.fromtimestamp(mktime(entry.published_parsed), tz=timezone.utc)
-        elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-            from time import mktime
-            return datetime.fromtimestamp(mktime(entry.updated_parsed), tz=timezone.utc)
-        return datetime.now(timezone.utc)
-
-    @staticmethod
-    def _extract_image_from_entry(entry: Any) -> str:
-        """Extract image URL from RSS entry"""
-        # Try media content
+    def _extract_image(entry: Any) -> Optional[str]:
+        """Extract image URL from RSS entry."""
         if hasattr(entry, 'media_content'):
             for media in entry.media_content:
                 if media.get('medium') == 'image':
-                    return media.get('url', '')
-
-        # Try enclosures
+                    return media.get('url')
         if hasattr(entry, 'enclosures'):
             for enclosure in entry.enclosures:
                 if 'image' in enclosure.get('type', ''):
-                    return enclosure.get('href', '')
+                    return enclosure.get('href')
+        return None
 
-        return ''
-
-
-# ============================================================================
-# CACHING LAYER
-# ============================================================================
 
 class NewsCacheManager:
-    """Redis-based caching for news articles"""
-    
+    """Redis-based caching for aggregated articles."""
+
     def __init__(self, redis_client: aioredis.Redis, ttl: int = 900):
         self.redis = redis_client
-        self.ttl = ttl  # 15 minutes default
-    
-    async def get_cached_articles(self, cache_key: str) -> Optional[List[Dict[str, Any]]]:
-        """Get cached articles"""
+        self.ttl = ttl
+
+    async def get(self, cache_key: str) -> Optional[List[RawArticle]]:
+        """Get cached articles."""
         try:
             cached = await self.redis.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for key: {cache_key}")
-                articles = json.loads(cached)
-                for article in articles:
-                    if 'published_date' in article and isinstance(article['published_date'], str):
-                        try:
-                            article['published_date'] = datetime.fromisoformat(article['published_date'])
-                        except Exception:
-                            article['published_date'] = datetime.now(timezone.utc)
-
-                return articles
+                logger.debug(f"Cache hit: {cache_key}")
+                data = json.loads(cached)
+                return [RawArticle.from_cache_dict(item) for item in data]
             return None
         except Exception as e:
-            logger.error(f"Error getting from cache: {e}")
+            logger.error(f"Cache get error: {e}")
             return None
-    
-    async def cache_articles(
-        self,
-        cache_key: str,
-        articles: List[Dict[str, Any]]
-    ) -> bool:
-        """Cache articles"""
+
+    async def set(self, cache_key: str, articles: List[RawArticle]) -> bool:
+        """Cache articles."""
         try:
-            # Convert datetime objects to ISO format for JSON serialization
-            serializable_articles = []
-            for article in articles:
-                article_copy = article.copy()
-                if 'published_date' in article_copy and isinstance(article_copy['published_date'], datetime):
-                    article_copy['published_date'] = article_copy['published_date'].isoformat()
-                serializable_articles.append(article_copy)
-            
-            await self.redis.setex(
-                cache_key,
-                self.ttl,
-                json.dumps(serializable_articles)
-            )
-            logger.debug(f"Cached {len(articles)} articles with key: {cache_key}")
+            data = [article.to_cache_dict() for article in articles]
+            await self.redis.setex(cache_key, self.ttl, json.dumps(data))
+            logger.debug(f"Cached {len(articles)} articles: {cache_key}")
             return True
         except Exception as e:
-            logger.error(f"Error caching articles: {e}")
+            logger.error(f"Cache set error: {e}")
             return False
-    
+
     @staticmethod
-    def generate_cache_key(source: str, query: Optional[str] = None, **kwargs) -> str:
-        """Generate cache key from parameters"""
-        key_parts = [source]
+    def build_key(source: str, query: Optional[str] = None, **kwargs) -> str:
+        """Generate cache key."""
+        parts = [source]
         if query:
-            key_parts.append(query)
+            parts.append(query)
         for k, v in sorted(kwargs.items()):
-            key_parts.append(f"{k}:{v}")
-        return f"news:{':'.join(key_parts)}"
+            parts.append(f"{k}:{v}")
+        return f"news:{':'.join(parts)}"
 
-
-# ============================================================================
-# MAIN NEWS AGGREGATOR SERVICE
-# ============================================================================
 
 class NewsAggregatorService:
-    """Main service for aggregating news from multiple sources"""
-    
+    """Aggregates news from multiple sources with caching and deduplication."""
+
     def __init__(
         self,
         redis_client: aioredis.Redis,
         newsapi_key: Optional[str] = None,
         cache_ttl: int = 900
     ):
-        self.cache_manager = NewsCacheManager(redis_client, ttl=cache_ttl)
+        self.cache = NewsCacheManager(redis_client, ttl=cache_ttl)
         self.deduplicator = ArticleDeduplicator()
-        
-        # Initialize fetchers
-        self.fetchers = {
+
+        self.fetchers: Dict[str, BaseFetcher] = {
             'newsapi': NewsAPIFetcher(api_key=newsapi_key),
             'gdelt': GDELTFetcher(),
             'rss': RSSFetcher()
         }
-    
+
+    @staticmethod
+    def _normalize_feed_url(url: str) -> str:
+        """Normalize feed URLs to improve topic mapping matches."""
+        return (url or "").strip().rstrip("/").lower()
+
+    def _topics_for_feed_url(self, feed_url: Optional[str]) -> List[str]:
+        if not feed_url:
+            return []
+
+        normalized_feed_url = self._normalize_feed_url(feed_url)
+        matched_topics: List[str] = []
+
+        for topic, urls in settings.RSS_TOPIC_FEED_URLS.items():
+            for mapped_url in urls:
+                if self._normalize_feed_url(mapped_url) == normalized_feed_url:
+                    matched_topics.append(topic)
+                    break
+
+        return _normalize_topic_values(matched_topics)
+
     async def aggregate_news(
         self,
         query: Optional[str] = None,
@@ -747,161 +485,128 @@ class NewsAggregatorService:
         use_cache: bool = True,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        """
-        Aggregate news from multiple sources
-        
-        Args:
-            query: Search query
-            sources: List of sources to fetch from (None = all)
-            limit: Maximum articles per source
-            deduplicate: Remove duplicate articles
-            use_cache: Use cached results
-            **kwargs: Additional parameters for fetchers
-            
-        Returns:
-            List of aggregated articles
-        """
-        # Generate cache key
-        cache_key = self.cache_manager.generate_cache_key(
-            source='all' if not sources else ','.join(sources),
+        topics = _normalize_topic_values(kwargs.get('topics') or [])
+
+        cache_key = self.cache.build_key(
+            source='all' if not sources else ','.join(sorted(sources)),
             query=query,
             limit=limit,
-            **kwargs
+            topics=','.join(sorted(topics))
         )
-        
+
         # Check cache
         if use_cache:
-            cached = await self.cache_manager.get_cached_articles(cache_key)
+            cached = await self.cache.get(cache_key)
             if cached:
                 logger.info(f"Returning {len(cached)} cached articles")
-                return cached
-        
-        # Determine which sources to use
-        if not sources:
-            sources = list(self.fetchers.keys())
-        
-        # Fetch from all sources concurrently
+                return [a.to_persistence_dict() for a in cached]
+
+        # Determine sources
+        source_list = sources or list(self.fetchers.keys())
+
+        # Build fetch tasks
         tasks = []
-        for source in sources:
+        for source in source_list:
             if source not in self.fetchers:
                 continue
 
             fetcher = self.fetchers[source]
 
             if source == 'rss':
-                feed_urls = kwargs.get('feed_urls')
+                feed_urls = kwargs.get('feed_urls', [])
                 feed_url = kwargs.get('feed_url')
-
+                if not feed_urls and topics:
+                    feed_urls = settings.get_rss_feed_urls_for_topics(topics)
                 if feed_urls:
                     for url in feed_urls:
-                        tasks.append(fetcher.fetch_articles(feed_url=url, limit=limit))
+                        rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
+                        tasks.append(fetcher.fetch(feed_url=url, limit=limit, topic_hints=rss_topic_hints))
                 elif feed_url:
-                    tasks.append(fetcher.fetch_articles(feed_url=feed_url, limit=limit))
-                elif query and isinstance(query, str) and query.startswith(("http://", "https://")):
-                    tasks.append(fetcher.fetch_articles(feed_url=query, limit=limit))
-                else:
-                    logger.info("RSS source selected but no feed URLs provided")
-                continue
+                    rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(feed_url))
+                    tasks.append(fetcher.fetch(feed_url=feed_url, limit=limit, topic_hints=rss_topic_hints))
+                elif query and query.startswith(('http://', 'https://')):
+                    rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(query))
+                    tasks.append(fetcher.fetch(feed_url=query, limit=limit, topic_hints=rss_topic_hints))
+                elif settings.ENABLE_RSS_FEEDS and settings.RSS_FEED_URLS:
+                    for url in settings.RSS_FEED_URLS:
+                        rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
+                        tasks.append(fetcher.fetch(feed_url=url, limit=limit, topic_hints=rss_topic_hints))
+            else:
+                tasks.append(fetcher.fetch(query=query, limit=limit, topic_hints=topics, **kwargs))
 
-            extra_params = {k: v for k, v in kwargs.items() if k not in {"feed_urls", "feed_url"}}
-            task = fetcher.fetch_articles(
-                query=query,
-                limit=limit,
-                **extra_params
-            )
-            tasks.append(task)
-        
-        # Wait for all fetches to complete
+        # Execute all fetches concurrently
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Combine results
-        all_articles = []
+
+        # Collect articles
+        all_articles: List[RawArticle] = []
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Fetch error: {result}")
                 continue
             if isinstance(result, list):
                 all_articles.extend(result)
-        
-        # Deduplicate if requested
+
+        # Deduplicate
         if deduplicate and all_articles:
-            all_articles = self.deduplicator.deduplicate_articles(all_articles)
-        
-        # Sort by published date
-        all_articles.sort(
-            key=lambda x: x.get('published_date', datetime.now(timezone.utc)),
-            reverse=True
-        )
-        
-        # Limit total articles
+            all_articles = self.deduplicator.deduplicate(all_articles)
+
+        # Sort by date (newest first)
+        all_articles.sort(key=lambda a: a.published_date, reverse=True)
+
+        # Limit results
         all_articles = all_articles[:limit]
-        
+
         # Cache results
         if use_cache and all_articles:
-            await self.cache_manager.cache_articles(cache_key, all_articles)
-        
-        logger.info(f"Aggregated {len(all_articles)} articles from {len(sources)} sources")
-        
-        return all_articles
-    
+            await self.cache.set(cache_key, all_articles)
+
+        logger.info(f"Aggregated {len(all_articles)} articles from {len(source_list)} sources")
+        return [a.to_persistence_dict() for a in all_articles]
+
     async def fetch_from_rss_feeds(
         self,
         feed_urls: List[str],
         limit_per_feed: int = 10,
         deduplicate: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        Fetch articles from multiple RSS feeds
-        
-        Args:
-            feed_urls: List of RSS feed URLs
-            limit_per_feed: Max articles per feed
-            deduplicate: Remove duplicates
-            
-        Returns:
-            List of articles from all feeds
-        """
+        """Fetch from multiple RSS feeds."""
         rss_fetcher = self.fetchers['rss']
-        
-        # Fetch from all feeds concurrently
-        tasks = [
-            rss_fetcher.fetch_articles(feed_url=feed_url, limit=limit_per_feed)
-            for feed_url in feed_urls
-        ]
-        
+
+        tasks = []
+        for url in feed_urls:
+            rss_topic_hints = self._topics_for_feed_url(url)
+            tasks.append(
+                rss_fetcher.fetch(feed_url=url, limit=limit_per_feed, topic_hints=rss_topic_hints)
+            )
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Combine results
-        all_articles = []
+
+        all_articles: List[RawArticle] = []
         for result in results:
             if isinstance(result, Exception):
-                logger.error(f"RSS fetch error: {result}")
+                logger.error(f"RSS error: {result}")
                 continue
             if isinstance(result, list):
                 all_articles.extend(result)
-        
-        # Deduplicate
+
         if deduplicate and all_articles:
-            all_articles = self.deduplicator.deduplicate_articles(all_articles)
-        
-        # Sort by date
-        all_articles.sort(
-            key=lambda x: x.get('published_date', datetime.now(timezone.utc)),
-            reverse=True
-        )
-        
+            all_articles = self.deduplicator.deduplicate(all_articles)
+
+        all_articles.sort(key=lambda a: a.published_date, reverse=True)
+
         logger.info(f"Fetched {len(all_articles)} articles from {len(feed_urls)} RSS feeds")
-        
-        return all_articles
+        return [a.to_persistence_dict() for a in all_articles]
 
 
-# Global instance (initialized with Redis client)
-news_aggregator: Optional[NewsAggregatorService] = None
+_aggregator_instance: Optional[NewsAggregatorService] = None
 
 
-def get_news_aggregator(redis_client: aioredis.Redis, newsapi_key: Optional[str] = None) -> NewsAggregatorService:
-    """Get or create news aggregator instance"""
-    global news_aggregator
-    if news_aggregator is None:
-        news_aggregator = NewsAggregatorService(redis_client, newsapi_key=newsapi_key)
-    return news_aggregator
+def get_news_aggregator(
+    redis_client: aioredis.Redis,
+    newsapi_key: Optional[str] = None
+) -> NewsAggregatorService:
+    """Get or create singleton aggregator instance."""
+    global _aggregator_instance
+    if _aggregator_instance is None:
+        _aggregator_instance = NewsAggregatorService(redis_client, newsapi_key=newsapi_key)
+    return _aggregator_instance

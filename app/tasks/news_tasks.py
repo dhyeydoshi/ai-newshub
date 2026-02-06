@@ -1,8 +1,4 @@
-﻿"""
-Celery Tasks for News Aggregation
-Background tasks for fetching, processing, and managing news articles
-"""
-from datetime import datetime, timezone, timedelta
+﻿from datetime import datetime, timezone, timedelta
 import logging
 from typing import Optional, List
 import asyncio
@@ -27,14 +23,6 @@ def fetch_and_save_news(
     sources: Optional[List[str]] = None,
     limit_per_query: int = 50
 ):
-    """
-    Celery task to fetch and save news articles
-
-    Args:
-        queries: List of search queries
-        sources: List of news sources
-        limit_per_query: Maximum articles per query
-    """
     return asyncio.run(_async_fetch_and_save_news(queries, sources, limit_per_query))
 
 
@@ -43,9 +31,6 @@ async def _async_fetch_and_save_news(
     sources: Optional[List[str]] = None,
     limit_per_query: int = 50
 ):
-    """
-    Async implementation of fetch and save news
-    """
     try:
         logger.info("Celery Task: Starting scheduled news fetch...")
 
@@ -72,8 +57,6 @@ async def _async_fetch_and_save_news(
         )
 
         try:
-            # Initialize centralized cache manager for invalidation
-            # This sets up the global singleton used by invalidate_article_cache()
             init_cache_manager(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
@@ -99,13 +82,14 @@ async def _async_fetch_and_save_news(
                     logger.info(f"Fetching news for query: {query}")
 
                     try:
-                        # Fetch articles (without cache to get fresh data)
+                        topic_hint = [query] if query else None
                         articles = await aggregator.aggregate_news(
                             query=query,
                             sources=sources,
                             limit=limit_per_query,
                             deduplicate=True,
-                            use_cache=False  # Don't use cache for scheduled fetches
+                            use_cache=False,
+                            topics=topic_hint
                         )
 
                         if articles:
@@ -176,19 +160,10 @@ async def _async_fetch_and_save_news(
     retry_jitter=True
 )
 def fetch_rss_feeds(self, feed_urls: Optional[List[str]] = None):
-    """
-    Celery task to fetch RSS feeds
-
-    Args:
-        feed_urls: List of RSS feed URLs
-    """
     return asyncio.run(_async_fetch_rss_feeds(feed_urls))
 
 
 async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
-    """
-    Async implementation of fetch RSS feeds
-    """
     try:
         # Import here to avoid circular imports
         from app.services.news_aggregator import NewsAggregatorService
@@ -199,7 +174,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
         import redis.asyncio as aioredis
 
         if not feed_urls:
-            feed_urls = settings.RSS_FEED_URLS
+            feed_urls = settings.get_all_rss_feed_urls()
 
         logger.info(f"Celery Task: Fetching from {len(feed_urls)} RSS feeds...")
 
@@ -288,19 +263,10 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
     retry_kwargs={'max_retries': 2, 'countdown': 600}
 )
 def cleanup_old_articles(self, days_old: int = 90):
-    """
-    Celery task to cleanup old articles
-
-    Args:
-        days_old: Articles older than this many days will be deactivated
-    """
     return asyncio.run(_async_cleanup_old_articles(days_old))
 
 
 async def _async_cleanup_old_articles(days_old: int = 90):
-    """
-    Async implementation of cleanup old articles
-    """
     try:
         from app.models.article import Article
         from app.core.database import AsyncSessionLocal
@@ -346,14 +312,6 @@ def fetch_news_manual(
     sources: Optional[List[str]] = None,
     limit: int = 50
 ):
-    """
-    Manual news fetch task (triggered via API)
-
-    Args:
-        query: Search query
-        sources: List of sources
-        limit: Maximum articles
-    """
     return asyncio.run(_async_fetch_news_manual(query, sources, limit))
 
 
@@ -362,9 +320,6 @@ async def _async_fetch_news_manual(
     sources: Optional[List[str]] = None,
     limit: int = 50
 ):
-    """
-    Async implementation of manual fetch
-    """
     try:
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
@@ -398,13 +353,14 @@ async def _async_fetch_news_manual(
                 cache_ttl=settings.NEWS_CACHE_TTL
             )
 
-            # Fetch articles
+            # Fetch articles (bypass cache for manual fetches to get latest data)
             articles = await aggregator.aggregate_news(
                 query=query,
                 sources=sources,
                 limit=limit,
                 deduplicate=True,
-                use_cache=False
+                use_cache=False,
+                topics=[query] if query else None
             )
 
             if articles:

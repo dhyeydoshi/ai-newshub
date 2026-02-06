@@ -1,29 +1,17 @@
-"""
-Redis Cache Manager
-Centralized caching utilities with compression, batch operations, and pattern management
-"""
 import json
 import gzip
 import hashlib
+from datetime import date, datetime
 from typing import Any, Optional, List, Dict, Callable
 import redis.asyncio as aioredis
 import logging
 from functools import wraps
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 
 class CacheManager:
-    """
-    Centralized Redis cache manager with advanced features
-
-    Features:
-    - Automatic compression for large values
-    - Batch operations
-    - Cache invalidation patterns
-    - Decorator for easy caching
-    - TTL strategies
-    """
 
     def __init__(
         self,
@@ -46,30 +34,33 @@ class CacheManager:
         key_str = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(key_str.encode()).hexdigest()[:16]
 
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, UUID):
+            return str(value)
+        return str(value)
+
     async def get(
         self,
         key: str,
         default: Any = None,
         deserializer: Callable = json.loads
     ) -> Any:
-        """
-        Get value from cache
-
-        Args:
-            key: Cache key
-            default: Default value if not found
-            deserializer: Function to deserialize value (default: json.loads)
-
-        Returns:
-            Cached value or default
-        """
         try:
             full_key = self._make_key(key)
-            value = await self.redis.get(full_key)
+            value = await self.redis.execute_command("GET", full_key, NEVER_DECODE=True)
 
             if value is None:
                 logger.debug(f"Cache miss: {key}")
                 return default
+
+            # Normalize to bytes if needed
+            if isinstance(value, memoryview):
+                value = value.tobytes()
+            elif isinstance(value, bytearray):
+                value = bytes(value)
 
             # Check if compressed
             if isinstance(value, bytes) and value.startswith(b'\x1f\x8b'):
@@ -95,25 +86,15 @@ class CacheManager:
         serializer: Callable = json.dumps,
         compress: Optional[bool] = None
     ) -> bool:
-        """
-        Set value in cache
-
-        Args:
-            key: Cache key
-            value: Value to cache
-            ttl: Time to live in seconds (None = default_ttl)
-            serializer: Function to serialize value (default: json.dumps)
-            compress: Force compression (None = auto based on size)
-
-        Returns:
-            True if successful
-        """
         try:
             full_key = self._make_key(key)
             ttl = ttl or self.default_ttl
 
             # Serialize
-            serialized = serializer(value)
+            if serializer is json.dumps:
+                serialized = json.dumps(value, default=self._json_default)
+            else:
+                serialized = serializer(value)
             if isinstance(serialized, str):
                 serialized = serialized.encode('utf-8')
 
@@ -143,15 +124,6 @@ class CacheManager:
             return False
 
     async def delete_pattern(self, pattern: str) -> int:
-        """
-        Delete all keys matching pattern
-
-        Args:
-            pattern: Pattern to match (e.g., "user:*")
-
-        Returns:
-            Number of keys deleted
-        """
         try:
             full_pattern = self._make_key(pattern)
             cursor = 0
@@ -182,27 +154,22 @@ class CacheManager:
         keys: List[str],
         deserializer: Callable = json.loads
     ) -> Dict[str, Any]:
-        """
-        Get multiple values at once
-
-        Args:
-            keys: List of cache keys
-            deserializer: Deserialization function
-
-        Returns:
-            Dictionary of key -> value (only found keys)
-        """
         try:
             if not keys:
                 return {}
 
             full_keys = [self._make_key(k) for k in keys]
-            values = await self.redis.mget(full_keys)
+            values = await self.redis.execute_command("MGET", *full_keys, NEVER_DECODE=True)
 
             result = {}
             for key, value in zip(keys, values):
                 if value is not None:
                     try:
+                        if isinstance(value, memoryview):
+                            value = value.tobytes()
+                        elif isinstance(value, bytearray):
+                            value = bytes(value)
+
                         # Decompress if needed
                         if isinstance(value, bytes) and value.startswith(b'\x1f\x8b'):
                             value = gzip.decompress(value)
@@ -227,17 +194,6 @@ class CacheManager:
         ttl: Optional[int] = None,
         serializer: Callable = json.dumps
     ) -> int:
-        """
-        Set multiple values at once
-
-        Args:
-            items: Dictionary of key -> value
-            ttl: Time to live for all items
-            serializer: Serialization function
-
-        Returns:
-            Number of items successfully set
-        """
         try:
             if not items:
                 return 0
@@ -247,7 +203,10 @@ class CacheManager:
 
             for key, value in items.items():
                 full_key = self._make_key(key)
-                serialized = serializer(value)
+                if serializer is json.dumps:
+                    serialized = json.dumps(value, default=self._json_default)
+                else:
+                    serialized = serializer(value)
                 if isinstance(serialized, str):
                     serialized = serialized.encode('utf-8')
 
@@ -316,14 +275,6 @@ class CacheManager:
         ttl: Optional[int] = None,
         key_builder: Optional[Callable] = None
     ):
-        """
-        Decorator to cache function results
-
-        Usage:
-            @cache_manager.cache_result("user", ttl=300)
-            async def get_user(user_id: str):
-                return await db.get(user_id)
-        """
         def decorator(func: Callable):
             @wraps(func)
             async def wrapper(*args, **kwargs):

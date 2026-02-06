@@ -1,7 +1,4 @@
-﻿"""News Summarizer - Streamlit Frontend
-Main Application Entry Point
-"""
-import streamlit as st
+﻿import streamlit as st
 from frontend_config import config
 from utils.auth import init_auth_state, logout
 from utils.ui_helpers import init_page_config, apply_custom_css

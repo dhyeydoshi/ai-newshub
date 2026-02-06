@@ -1,7 +1,4 @@
-﻿"""API Service Layer
-Handles all communication with the backend API
-"""
-from typing import Optional, Dict, Any, List
+﻿from typing import Optional, Dict, Any, List
 import logging
 import requests
 import streamlit as st
@@ -59,9 +56,6 @@ class APIService:
             if key in st.session_state:
                 del st.session_state[key]
 
-    # ======================================================================
-    # AUTHENTICATION
-    # ======================================================================
 
     def register(self, email: str, password: str, username: str, full_name: str) -> Dict[str, Any]:
         """Register new user"""
@@ -118,8 +112,6 @@ class APIService:
                     data = {"raw": response.text}
                 return {"success": True, "data": data}
 
-            # Current-device logout is idempotent. Even if backend rejects
-            # due token state, local auth should still be cleared.
             if not all_devices and response.status_code in (401, 403):
                 return {"success": True, "data": {"message": "Logged out locally"}}
 
@@ -180,9 +172,6 @@ class APIService:
             self.session.cookies.clear()
             return False
 
-    # ======================================================================
-    # NEWS
-    # ======================================================================
 
     def get_latest_news(
         self, page: int = 1, limit: int = 10, topics: Optional[List[str]] = None
@@ -236,16 +225,34 @@ class APIService:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    def trigger_news_fetch(self, queries: Optional[List[str]] = None, limit: int = 50) -> Dict[str, Any]:
+    def trigger_news_fetch(
+        self,
+        queries: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
+        limit: int = 50
+    ) -> Dict[str, Any]:
         """Manually trigger news fetch (requires authentication)"""
         try:
             params = {"limit": limit}
             if queries:
                 params["queries"] = queries
+            if sources:
+                params["sources"] = sources
 
             response = self.session.post(
                 f"{self.base_url}/news/fetch-now",
                 params=params,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def get_task_status(self, task_id: str) -> Dict[str, Any]:
+        """Get Celery task status."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/news/task-status/{task_id}",
                 headers=self._get_headers(),
             )
             return self._handle_response(response)
@@ -263,9 +270,6 @@ class APIService:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    # ======================================================================
-    # RECOMMENDATIONS
-    # ======================================================================
 
     def get_recommendations(self, limit: int = 10) -> Dict[str, Any]:
         """Get personalized recommendations"""
@@ -300,9 +304,6 @@ class APIService:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    # ======================================================================
-    # USER
-    # ======================================================================
 
     def get_profile(self) -> Dict[str, Any]:
         """Get user profile"""

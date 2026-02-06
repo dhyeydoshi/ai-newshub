@@ -1,6 +1,2 @@
-"""
-Core components package
-TODO: Add core functionality modules
-"""
-
-
+"""Core components package"""
+from app.core.sanitizer import ContentSanitizer

@@ -1,16 +1,9 @@
-"""
-Pydantic Schemas for Authentication
-"""
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from uuid import UUID
 import re
 
-
-# ============================================================================
-# Request Schemas
-# ============================================================================
 
 class UserRegister(BaseModel):
     """User registration request"""
@@ -89,10 +82,6 @@ class ResendVerification(BaseModel):
     """Resend verification email"""
     email: EmailStr
 
-
-# ============================================================================
-# Response Schemas
-# ============================================================================
 
 class UserResponse(BaseModel):
     """User response"""

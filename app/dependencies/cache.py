@@ -1,7 +1,3 @@
-"""
-Cache Dependency for API Endpoints
-Provides request-level caching before database queries
-"""
 import json
 import hashlib
 from typing import Optional, Any, Callable
@@ -28,16 +24,6 @@ class CacheConfig:
 
 
 def generate_cache_key_from_request(request: Request, prefix: str = "") -> str:
-    """
-    Generate unique cache key from request parameters
-
-    Args:
-        request: FastAPI request object
-        prefix: Cache key prefix (e.g., "articles", "user")
-
-    Returns:
-        Unique cache key based on endpoint and parameters
-    """
     # Include path
     path = request.url.path
 
@@ -63,15 +49,6 @@ def generate_cache_key_from_request(request: Request, prefix: str = "") -> str:
 
 
 async def get_cached_response(cache_key: str) -> Optional[dict]:
-    """
-    Get cached response from Redis
-
-    Args:
-        cache_key: Cache key to lookup
-
-    Returns:
-        Cached response data or None
-    """
     cache_manager = get_cache_manager()
     if not cache_manager:
         return None
@@ -90,17 +67,6 @@ async def get_cached_response(cache_key: str) -> Optional[dict]:
 
 
 async def set_cached_response(cache_key: str, data: Any, ttl: int) -> bool:
-    """
-    Set cached response in Redis
-
-    Args:
-        cache_key: Cache key
-        data: Response data to cache
-        ttl: Time to live in seconds
-
-    Returns:
-        True if successful
-    """
     cache_manager = get_cache_manager()
     if not cache_manager:
         return False
@@ -116,15 +82,6 @@ async def set_cached_response(cache_key: str, data: Any, ttl: int) -> bool:
 
 
 async def invalidate_cache_pattern(pattern: str) -> int:
-    """
-    Invalidate all cache keys matching pattern
-
-    Args:
-        pattern: Pattern to match (e.g., "articles:*", "user:123:*")
-
-    Returns:
-        Number of keys deleted
-    """
     cache_manager = get_cache_manager()
     if not cache_manager:
         return 0
@@ -144,21 +101,6 @@ def cache_endpoint(
     key_builder: Optional[Callable] = None,
     user_specific: bool = True
 ):
-    """
-    Decorator to cache endpoint responses
-
-    Usage:
-        @router.get("/articles")
-        @cache_endpoint(prefix="articles", ttl=300)
-        async def get_articles(...):
-            ...
-
-    Args:
-        prefix: Cache key prefix
-        ttl: Time to live in seconds
-        key_builder: Custom function to build cache key
-        user_specific: Include user ID in cache key
-    """
     def decorator(func: Callable):
         @wraps(func)
         async def wrapper(*args, **kwargs):

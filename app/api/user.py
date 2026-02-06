@@ -37,22 +37,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user", tags=["User Profile"])
 
 
-# ============================================================================
-# PROFILE MANAGEMENT WITH CACHING
-# ============================================================================
-
 @router.get("/profile", response_model=UserProfileResponse)
 async def get_user_profile(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get current user profile
-
-    Features:
-    - Redis caching (3 min TTL)
-    - Returns comprehensive user information including reading statistics
-    """
     # Build cache key
     cache_key = build_user_profile_key(user_id=user_id)
 
@@ -89,15 +78,6 @@ async def update_user_profile(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Update user profile
-
-    Security:
-    - Username uniqueness validation
-    - Email uniqueness validation
-    - Input sanitization via Pydantic
-    - Cache invalidation on update
-    """
     result = await db.execute(
         select(User).where(User.user_id == user_id)
     )
@@ -149,22 +129,11 @@ async def update_user_profile(
     return UserProfileResponse.model_validate(user)
 
 
-# ============================================================================
-# PREFERENCES MANAGEMENT WITH CACHING
-# ============================================================================
-
 @router.get("/preferences", response_model=UserPreferencesResponse)
 async def get_user_preferences(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get user preferences for personalization
-
-    Features:
-    - Redis caching (2 hours TTL)
-    - Returns topic preferences, favorite topics, and notification settings
-    """
     # Build cache key
     cache_key = f"user:preferences:{user_id}"
 
@@ -212,14 +181,6 @@ async def update_user_preferences(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Update user preferences
-
-    Security:
-    - Input validation and sanitization
-    - Preference score bounds checking (0.0-1.0)
-    - Cache invalidation on update
-    """
     # Get user
     result = await db.execute(
         select(User).where(User.user_id == user_id)
@@ -255,10 +216,6 @@ async def update_user_preferences(
     return await get_user_preferences(user_id, db)
 
 
-# ============================================================================
-# READING HISTORY & ANALYTICS
-# ============================================================================
-
 @router.get("/reading-history", response_model=ReadingHistoryResponse)
 async def get_reading_history(
     page: int = 1,
@@ -266,11 +223,6 @@ async def get_reading_history(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get user reading history with pagination
-
-    Returns articles the user has viewed or read
-    """
     # Calculate offset
     offset = (page - 1) * page_size
 
@@ -320,11 +272,6 @@ async def get_user_engagement(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get user engagement statistics
-
-    Returns reading patterns, favorite topics, and activity metrics
-    """
     # Get user
     user_result = await db.execute(
         select(User).where(User.user_id == user_id)
@@ -403,24 +350,12 @@ async def get_user_engagement(
     )
 
 
-# ============================================================================
-# ACCOUNT MANAGEMENT
-# ============================================================================
-
 @router.delete("/account", response_model=MessageResponse)
 async def delete_user_account(
     deletion_request: AccountDeletionRequest,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Delete user account (GDPR compliance)
-
-    Security:
-    - Password verification required
-    - Confirmation string required
-    - Soft delete with data anonymization
-    """
     # Get user
     result = await db.execute(
         select(User).where(User.user_id == user_id)
@@ -464,11 +399,6 @@ async def export_user_data(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Export user data (GDPR compliance)
-
-    Returns all user data in requested format
-    """
     # Get user
     result = await db.execute(
         select(User).where(User.user_id == user_id)

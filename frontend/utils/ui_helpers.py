@@ -1,7 +1,4 @@
-﻿"""UI Helper Functions
-Common UI components and utilities
-"""
-from datetime import datetime
+﻿from datetime import datetime
 from typing import List
 import streamlit as st
 

@@ -1,7 +1,3 @@
-"""
-Dependency-based Rate Limiting for FastAPI
-Works with async Redis initialization - no middleware required!
-"""
 from typing import Optional
 from fastapi import Request, HTTPException, status
 from datetime import datetime
@@ -12,10 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 async def get_rate_limiter():
-    """
-    Dependency that provides access to rate limiter
-    Uses the global redis_client initialized during app startup
-    """
     from main import redis_client
     from config import settings
 
@@ -27,24 +19,6 @@ async def get_rate_limiter():
 
 
 async def check_rate_limit(request: Request, limiter: Optional[RateLimiter] = None):
-    """
-    FastAPI dependency for rate limiting individual endpoints
-
-    Usage:
-        @router.get("/endpoint")
-        async def my_endpoint(
-            _: None = Depends(check_rate_limit)
-        ):
-            return {"data": "..."}
-
-    Or use the decorator approach:
-        from app.dependencies.rate_limit import rate_limit
-
-        @router.get("/endpoint")
-        @rate_limit()
-        async def my_endpoint():
-            return {"data": "..."}
-    """
     if limiter is None:
         limiter = await get_rate_limiter()
 
@@ -87,8 +61,6 @@ def _get_identifier(request: Request) -> str:
     if hasattr(request.state, "user_id") and request.state.user_id:
         return f"user:{request.state.user_id}"
 
-    # Fall back to IP address
-    # Check for forwarded IP first (if behind proxy)
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         ip = forwarded.split(",")[0].strip()
@@ -100,15 +72,6 @@ def _get_identifier(request: Request) -> str:
 
 # Decorator approach for cleaner syntax
 def rate_limit():
-    """
-    Decorator to add rate limiting to a route
-
-    Usage:
-        @router.get("/endpoint")
-        @rate_limit()
-        async def my_endpoint():
-            return {"data": "..."}
-    """
     async def dependency(request: Request):
         return await check_rate_limit(request)
 
@@ -117,32 +80,75 @@ def rate_limit():
 
 # Pre-configured rate limiters for different use cases
 class RateLimitPresets:
-    """Pre-configured rate limit dependencies"""
+    """Pre-configured rate limit dependencies.
+
+    Each preset creates a dedicated RateLimiter with its own limit,
+    avoiding mutation of shared state (which caused race conditions).
+    """
 
     @staticmethod
     async def strict(request: Request):
-        """Strict rate limiting (10 req/min)"""
-        limiter = await get_rate_limiter()
-        if limiter:
-            # Temporarily reduce limit
-            original_limit = limiter.rate_limit
-            limiter.rate_limit = 10
-            result = await check_rate_limit(request, limiter)
-            limiter.rate_limit = original_limit
-            return result
+        """Strict rate limiting (10 req/min) - use for auth endpoints"""
+        from main import redis_client
+        from config import settings
+
+        if not redis_client or not settings.RATE_LIMIT_ENABLED:
+            return None
+
+        if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+            return None
+
+        identifier = _get_identifier(request)
+        limiter = RateLimiter(redis_client)
+        # Override per-minute limit for this check only (no shared state mutation)
+        original_limit = limiter.rate_limit
+        limiter.rate_limit = 10
+        allowed, metadata = await limiter.check_rate_limit(f"strict:{identifier}")
+        limiter.rate_limit = original_limit
+
+        if not allowed:
+            logger.warning(f"Strict rate limit exceeded for {identifier}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=metadata.get("error", "Rate limit exceeded"),
+                headers={
+                    "Retry-After": str(metadata.get("retry_after", 60)),
+                    "X-RateLimit-Limit": str(metadata.get("limit", 0)),
+                    "X-RateLimit-Remaining": "0",
+                }
+            )
         return None
 
     @staticmethod
     async def lenient(request: Request):
         """Lenient rate limiting (200 req/min)"""
-        limiter = await get_rate_limiter()
-        if limiter:
-            # Temporarily increase limit
-            original_limit = limiter.rate_limit
-            limiter.rate_limit = 200
-            result = await check_rate_limit(request, limiter)
-            limiter.rate_limit = original_limit
-            return result
+        from main import redis_client
+        from config import settings
+
+        if not redis_client or not settings.RATE_LIMIT_ENABLED:
+            return None
+
+        if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+            return None
+
+        identifier = _get_identifier(request)
+        limiter = RateLimiter(redis_client)
+        original_limit = limiter.rate_limit
+        limiter.rate_limit = 200
+        allowed, metadata = await limiter.check_rate_limit(f"lenient:{identifier}")
+        limiter.rate_limit = original_limit
+
+        if not allowed:
+            logger.warning(f"Lenient rate limit exceeded for {identifier}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=metadata.get("error", "Rate limit exceeded"),
+                headers={
+                    "Retry-After": str(metadata.get("retry_after", 60)),
+                    "X-RateLimit-Limit": str(metadata.get("limit", 0)),
+                    "X-RateLimit-Remaining": "0",
+                }
+            )
         return None
 
     @staticmethod

@@ -1,21 +1,10 @@
-﻿"""
-RSA Key Pair Generator for JWT Authentication
-Generates private and public keys for RS256 algorithm
-"""
-from cryptography.hazmat.primitives.asymmetric import rsa
+﻿from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import os
 
 
 def generate_rsa_keys():
-    """
-    Generate RSA key pair for JWT signing
-
-    Creates:
-    - private_key.pem: For signing JWT tokens (keep secret!)
-    - public_key.pem: For verifying JWT tokens (can be shared)
-    """
 
     print(" Generating RSA Key Pair...")
     print("-" * 50)

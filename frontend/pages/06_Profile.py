@@ -50,9 +50,6 @@ def main() -> None:
         "Account",
     ])
 
-    # ====================================================================
-    # PROFILE INFO
-    # ====================================================================
     with tab1:
         st.markdown("### Personal Information")
 
@@ -153,9 +150,6 @@ def main() -> None:
             if member_since:
                 st.metric("Member Since", format_date(member_since))
 
-    # ====================================================================
-    # READING HISTORY
-    # ====================================================================
     with tab2:
         st.markdown("### Your Reading History")
         st.caption("Articles you've read recently")
@@ -212,9 +206,6 @@ def main() -> None:
         else:
             show_error("Failed to load reading history")
 
-    # ====================================================================
-    # ANALYTICS
-    # ====================================================================
     with tab3:
         st.markdown("### Your Reading Analytics")
         st.caption("Insights into your reading habits")
@@ -290,9 +281,6 @@ def main() -> None:
             """
             )
 
-    # ====================================================================
-    # ACCOUNT SETTINGS
-    # ====================================================================
     with tab4:
         st.markdown("### Account Security")
 

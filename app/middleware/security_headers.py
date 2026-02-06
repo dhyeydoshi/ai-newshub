@@ -1,7 +1,3 @@
-"""
-Security Headers Middleware
-Implements comprehensive security headers for API protection
-"""
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -12,10 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """
-    Adds security headers to all responses
-    Implements OWASP best practices
-    """
 
     async def dispatch(self, request: Request, call_next) -> Response:
         """Add security headers to response"""
@@ -69,11 +61,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.ENABLE_CSP:
             security_headers["Content-Security-Policy"] = settings.CSP_POLICY
 
-        # API-specific headers
-        security_headers.update({
-            "X-API-Version": settings.APP_VERSION,
-            "X-Content-Type-Options": "nosniff",
-        })
+        # API-specific headers (version only exposed in non-production)
+        if not settings.is_production:
+            security_headers["X-API-Version"] = settings.APP_VERSION
 
         # Apply all headers
         for header, value in security_headers.items():

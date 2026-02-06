@@ -1,7 +1,3 @@
-"""
-JWT Utilities with RS256 Algorithm
-Handles token creation, validation, and refresh token rotation
-"""
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from jose import jwt, JWTError
@@ -30,16 +26,6 @@ class JWTManager:
         subject: str,
         additional_claims: Optional[Dict[str, Any]] = None
     ) -> str:
-        """
-        Create JWT access token
-
-        Args:
-            subject: Token subject (usually user_id)
-            additional_claims: Additional claims to include
-
-        Returns:
-            Encoded JWT token
-        """
         now = datetime.now(timezone.utc)
         expire = now + timedelta(hours=self.access_token_expire)
 
@@ -73,16 +59,6 @@ class JWTManager:
         subject: str,
         session_id: Optional[str] = None
     ) -> str:
-        """
-        Create JWT refresh token
-
-        Args:
-            subject: Token subject (usually user_id)
-            session_id: Session identifier for tracking
-
-        Returns:
-            Encoded JWT refresh token
-        """
         now = datetime.now(timezone.utc)
         expire = now + timedelta(days=self.refresh_token_expire)
 
@@ -112,18 +88,6 @@ class JWTManager:
             )
 
     def decode_token(self, token: str) -> Dict[str, Any]:
-        """
-        Decode and validate JWT token
-
-        Args:
-            token: JWT token to decode
-
-        Returns:
-            Decoded token claims
-
-        Raises:
-            HTTPException: If token is invalid
-        """
         try:
             payload = jwt.decode(
                 token,
@@ -152,16 +116,6 @@ class JWTManager:
             )
 
     def validate_token_type(self, payload: Dict[str, Any], expected_type: str) -> None:
-        """
-        Validate token type
-
-        Args:
-            payload: Decoded token payload
-            expected_type: Expected token type (access or refresh)
-
-        Raises:
-            HTTPException: If token type doesn't match
-        """
         token_type = payload.get("type")
         if token_type != expected_type:
             raise HTTPException(
@@ -171,15 +125,6 @@ class JWTManager:
             )
 
     def get_token_subject(self, token: str) -> str:
-        """
-        Extract subject from token
-
-        Args:
-            token: JWT token
-
-        Returns:
-            Token subject (user_id)
-        """
         payload = self.decode_token(token)
         subject = payload.get("sub")
         if not subject:
@@ -190,15 +135,6 @@ class JWTManager:
         return subject
 
     def get_token_expiry(self, token: str) -> datetime:
-        """
-        Get token expiration time
-
-        Args:
-            token: JWT token
-
-        Returns:
-            Expiration datetime
-        """
         payload = self.decode_token(token)
         exp = payload.get("exp")
         if not exp:

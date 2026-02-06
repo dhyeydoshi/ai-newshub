@@ -1,7 +1,3 @@
-"""
-Database Connection and Session Management
-Complete async SQLAlchemy setup for production use
-"""
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
@@ -15,8 +11,6 @@ logger = logging.getLogger(__name__)
 # Create declarative base
 Base = declarative_base()
 
-# Create async engine with optimized pooling
-# Note: For async engines, SQLAlchemy automatically uses the correct pool class
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
@@ -41,14 +35,6 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency for getting async database session
-
-    Usage in FastAPI:
-        @app.get("/endpoint")
-        async def endpoint(db: AsyncSession = Depends(get_db)):
-            ...
-    """
     async with AsyncSessionLocal() as session:
         try:
             yield session

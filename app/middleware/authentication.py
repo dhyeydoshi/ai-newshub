@@ -1,8 +1,4 @@
-"""
-Authentication Middleware
-JWT validation, token expiration checks, and refresh token rotation
-"""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -15,12 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
-    """
-    JWT authentication middleware
-    - Validates JWT tokens
-    - Checks token expiration
-    - Handles refresh token rotation
-    """
 
     # Public endpoints that don't require authentication
     PUBLIC_PATHS = [
@@ -33,7 +23,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         "/api/v1/auth/register",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",
-        "/api/v1/news/aggregate",
     ]
 
     def __init__(self, app):
@@ -226,44 +215,3 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         rotation_threshold = 300  # 5 minutes
 
         return time_until_expiry < rotation_threshold
-
-    @staticmethod
-    def create_access_token(data: Dict[str, Any]) -> str:
-        """Create new access token (utility method)"""
-        to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + timedelta(
-            hours=settings.ACCESS_TOKEN_EXPIRE_HOURS
-        )
-        to_encode.update({
-            "exp": expire,
-            "iat": datetime.now(timezone.utc),
-            "type": "access"
-        })
-        key = settings.JWT_PRIVATE_KEY if settings.JWT_ALGORITHM == "RS256" else settings.SECRET_KEY
-
-        return jwt.encode(
-            to_encode,
-            key,
-            algorithm=settings.JWT_ALGORITHM
-        )
-
-    @staticmethod
-    def create_refresh_token(data: Dict[str, Any]) -> str:
-        """Create new refresh token (utility method)"""
-        to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
-        to_encode.update({
-            "exp": expire,
-            "iat": datetime.now(timezone.utc),
-            "type": "refresh"
-        })
-
-        key = settings.JWT_PRIVATE_KEY if settings.JWT_ALGORITHM == "RS256" else settings.SECRET_KEY
-
-        return jwt.encode(
-            to_encode,
-            key,
-            algorithm=settings.JWT_ALGORITHM
-        )

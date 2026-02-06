@@ -1,7 +1,3 @@
-"""
-Article Model for News Recommendation System
-Stores news articles with content, topics, and metadata
-"""
 from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Boolean, Float, ARRAY, CheckConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -42,22 +38,8 @@ class Article(Base):
     scraped_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
                           server_default='CURRENT_TIMESTAMP')
 
-    # summary = Column(Text, nullable=True)
-    #
-    # # Metadata
-    # author = Column(String(255), nullable=True)
-    # source = Column(String(255), nullable=False)
-    # url = Column(String(1000), unique=True, nullable=False)
     image_url = Column(String(1000), nullable=True)
-    #
-    # # Categorization
-    # topics = Column(JSON, default=list)  # ["technology", "ai", "business"]
-    # category = Column(String(100), nullable=True)
-    # tags = Column(JSON, default=list)
 
-    # Publishing info
-    # published_at = Column(DateTime(timezone=True), nullable=False)
-    # scraped_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Content metrics
     word_count = Column(Integer, default=0)
@@ -91,8 +73,6 @@ class Article(Base):
         ),
     )
 
-    # Relationships - OPTIMIZED with lazy loading
-    # Use lazy='dynamic' for large collections that may need filtering
     reading_history = relationship(
         "ReadingHistory",
         back_populates="article",

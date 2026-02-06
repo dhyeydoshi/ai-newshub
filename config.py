@@ -1,18 +1,13 @@
-﻿"""
-Configuration Management Module
-Complete settings for security middleware
-"""
-import json
+﻿import json
 import warnings
 from email.policy import default
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import Field, field_validator, model_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 import secrets
 from pathlib import Path
 from urllib.parse import quote_plus
-
 
 
 class Settings(BaseSettings):
@@ -66,16 +61,18 @@ class Settings(BaseSettings):
     ARGON2_HASH_LENGTH: int = 32
     ARGON2_SALT_LENGTH: int = 16
 
-    # ========================================================================
-    # REDIS CONFIGURATION
-    # ========================================================================
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_MAX_CONNECTIONS: int = 50
     REDIS_CACHE_TTL: int = 900  # 15 minutes default cache TTL
+    CELERY_BROKER_URL: Optional[str] = Field(
+        default=None,
+        description="Celery broker URL (defaults to REDIS_URL)"
+    )
+    CELERY_RESULT_BACKEND: Optional[str] = Field(
+        default=None,
+        description="Celery result backend URL (defaults to broker URL)"
+    )
 
-    # ========================================================================
-    # SECURITY CONFIGURATION
-    # ========================================================================
     SECRET_KEY: str = Field(
         default="",
         description="Main application secret key (min 32 chars)"
@@ -233,9 +230,6 @@ class Settings(BaseSettings):
     # API Security
     API_KEY_HEADER: str = "X-API-Key"
 
-    # ========================================================================
-    # NEWS AGGREGATION SERVICES
-    # ========================================================================
     NEWSAPI_KEY: Optional[str] = Field(
         default=None,
         description="NewsAPI.org API key"
@@ -243,6 +237,14 @@ class Settings(BaseSettings):
     NEWSAPI_BASE_URL: str = "https://newsapi.org/v2"
     NEWSAPI_TIMEOUT: int = 5
     NEWSAPI_MAX_RETRIES: int = 3
+    HTTP_CLIENT_TRUST_ENV: bool = Field(
+        default=False,
+        description="Allow HTTP client to use system proxy/TLS env vars (HTTP_PROXY, HTTPS_PROXY, etc.)"
+    )
+    HTTP_CLIENT_FOLLOW_REDIRECTS: bool = Field(
+        default=True,
+        description="Follow HTTP redirects when fetching external feeds/APIs"
+    )
 
     # GDELT Configuration
     GDELT_BASE_URL: str = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -300,6 +302,48 @@ class Settings(BaseSettings):
         ],
         description="RSS feed URLs to fetch from"
     )
+    RSS_TOPIC_FEED_URLS: Dict[str, List[str]] = Field(
+        default={
+            "technology": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+                "https://feeds.bbci.co.uk/news/technology/rss.xml",
+                "https://www.wired.com/feed/rss",
+                "https://techcrunch.com/feed/",
+                "https://www.theverge.com/rss/index.xml",
+            ],
+            "science": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+                "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+                "https://www.sciencedaily.com/rss/top/science.xml",
+            ],
+            "business": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+                "https://feeds.bbci.co.uk/news/business/rss.xml",
+                "https://www.cnbc.com/id/10001147/device/rss/rss.html",
+            ],
+            "politics": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+                "https://feeds.bbci.co.uk/news/politics/rss.xml",
+            ],
+            "health": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",
+                "https://feeds.bbci.co.uk/news/health/rss.xml",
+            ],
+            "sports": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml",
+                "https://feeds.bbci.co.uk/sport/rss.xml",
+            ],
+            "entertainment": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml",
+                "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+            ],
+            "world": [
+                "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+                "https://feeds.bbci.co.uk/news/world/rss.xml",
+            ],
+        },
+        description="Topic to RSS feed URL mapping used for topic-driven RSS ingestion",
+    )
 
     @field_validator("NEWS_SOURCES", mode="before")
     @classmethod
@@ -325,6 +369,78 @@ class Settings(BaseSettings):
             return [url.strip() for url in v.split(",") if url.strip()]
         return v
 
+    @field_validator("RSS_TOPIC_FEED_URLS", mode="before")
+    @classmethod
+    def parse_topic_rss_urls(cls, v) -> Dict[str, List[str]]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return {}
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+
+        if not isinstance(v, dict):
+            return {}
+
+        normalized: Dict[str, List[str]] = {}
+        for topic, urls in v.items():
+            if not isinstance(topic, str):
+                continue
+
+            topic_key = topic.strip().lower()
+            if not topic_key:
+                continue
+
+            if isinstance(urls, str):
+                parsed_urls = [u.strip() for u in urls.split(",") if u.strip()]
+            elif isinstance(urls, list):
+                parsed_urls = [str(u).strip() for u in urls if str(u).strip()]
+            else:
+                continue
+
+            if parsed_urls:
+                normalized[topic_key] = parsed_urls
+
+        return normalized
+
+    def get_rss_feed_urls_for_topics(self, topics: Optional[List[str]]) -> List[str]:
+        if not topics:
+            return list(self.RSS_FEED_URLS)
+
+        urls: List[str] = []
+        seen = set()
+        for topic in topics:
+            topic_key = (topic or "").strip().lower()
+            if not topic_key:
+                continue
+            for url in self.RSS_TOPIC_FEED_URLS.get(topic_key, []):
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+
+        if urls:
+            return urls
+        return list(self.RSS_FEED_URLS)
+
+    def get_all_rss_feed_urls(self) -> List[str]:
+        all_urls: List[str] = []
+        seen = set()
+
+        for url in self.RSS_FEED_URLS:
+            if url and url not in seen:
+                seen.add(url)
+                all_urls.append(url)
+
+        for topic_urls in self.RSS_TOPIC_FEED_URLS.values():
+            for url in topic_urls:
+                if url and url not in seen:
+                    seen.add(url)
+                    all_urls.append(url)
+
+        return all_urls
+
     @model_validator(mode='after')
     def set_news_api_key(self):
         """Set NEWS_API_KEY from NEWSAPI_KEY if not provided"""
@@ -332,9 +448,15 @@ class Settings(BaseSettings):
             self.NEWS_API_KEY = self.NEWSAPI_KEY
         return self
 
-    # ========================================================================
-    # RATE LIMITING CONFIGURATION
-    # ========================================================================
+    @model_validator(mode='after')
+    def set_celery_redis_urls(self):
+        """Default Celery URLs to Redis URL when not explicitly set."""
+        if not self.CELERY_BROKER_URL:
+            self.CELERY_BROKER_URL = self.REDIS_URL
+        if not self.CELERY_RESULT_BACKEND:
+            self.CELERY_RESULT_BACKEND = self.CELERY_BROKER_URL
+        return self
+
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_PER_MINUTE: int = 100
     RATE_LIMIT_BURST: int = 20  # Burst allowance
@@ -342,9 +464,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_MAX_VIOLATIONS: int = 5  # Max violations before extended ban
     RATE_LIMIT_BAN_DURATION_MINUTES: int = 60  # Ban duration after max violations
 
-    # ========================================================================
-    # REQUEST VALIDATION CONFIGURATION
-    # ========================================================================
     MAX_REQUEST_SIZE_MB: int = Field(default=1)
     ALLOWED_CONTENT_TYPES: List[str] = [
         "application/json",
@@ -369,9 +488,6 @@ class Settings(BaseSettings):
                 return [ct.strip() for ct in v.split(",") if ct.strip()]
         return v
 
-    # ========================================================================
-    # SECURITY HEADERS CONFIGURATION
-    # ========================================================================
     ENABLE_HSTS: bool = True
     HSTS_MAX_AGE: int = 31536000  # 1 year
     ENABLE_CSP: bool = True
@@ -383,9 +499,6 @@ class Settings(BaseSettings):
         "font-src 'self' data:;"
     )
 
-    # ========================================================================
-    # LOGGING CONFIGURATION
-    # ========================================================================
     LOG_LEVEL: str = Field(default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     LOG_FILE: str = "logs/app.log"
     LOG_MAX_SIZE_MB: int = 10
@@ -410,9 +523,6 @@ class Settings(BaseSettings):
         return v.upper()
 
 
-    # ========================================================================
-    # FILE UPLOAD CONFIGURATION
-    # ========================================================================
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 10
     ALLOWED_EXTENSIONS: List[str] = ["jpg", "jpeg", "png", "gif", "pdf", "txt", "csv"]
@@ -425,9 +535,6 @@ class Settings(BaseSettings):
             return [ext.strip() for ext in v.split(",")]
         return v
 
-    # ========================================================================
-    # EMAIL CONFIGURATION
-    # ========================================================================
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: Optional[str] = Field(
@@ -441,14 +548,7 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = "noreply@newssummarizer.com"
     SMTP_FROM_NAME: str = "News Summarizer"
 
-    # ========================================================================
-    # TESTING
-    # ========================================================================
-    #TEST_DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/news_summarizer_test"
 
-    # ========================================================================
-    # COMPUTED PROPERTIES
-    # ========================================================================
     @property
     def cookie_secure(self) -> bool:
         """Secure cookies in production only"""
@@ -459,9 +559,6 @@ class Settings(BaseSettings):
         """Check if running in production"""
         return self.ENVIRONMENT == "production"
 
-    # ========================================================================
-    # DATABASE CONFIGURATION
-    # ========================================================================
 
     DB_USER: str = Field(
         default="postgres",
@@ -499,10 +596,6 @@ class Settings(BaseSettings):
         return f"postgresql://{self.DB_USER}:{encoded_password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     def validate_configuration(self) -> List[str]:
-        """
-        Validate configuration and return list of warnings/issues
-        Useful for startup checks
-        """
         issues = []
 
         # Check critical keys
@@ -518,13 +611,8 @@ class Settings(BaseSettings):
         return issues
 
 
-
 @lru_cache()
 def get_settings() -> Settings:
-    """
-    Get cached settings instance
-    Using lru_cache ensures we only load settings once
-    """
     settings = Settings()
     issues = settings.validate_configuration()
     if issues:

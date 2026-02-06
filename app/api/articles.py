@@ -1,8 +1,4 @@
-﻿"""
-Articles API Router
-Complete article and news endpoints with personalization and security
-"""
-from typing import Optional, List
+﻿from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc
@@ -28,16 +24,13 @@ from app.dependencies.cache import (
     CacheConfig,
     build_article_list_key
 )
+from app.core.sanitizer import ContentSanitizer
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/news", tags=["News & Articles"])
 
-
-# ============================================================================
-# ARTICLE LISTING FROM DATABASE WITH CACHING
-# ============================================================================
 
 @router.get("/articles", response_model=ArticleListResponse)
 async def get_articles(
@@ -48,16 +41,6 @@ async def get_articles(
     language: str = Query("en", max_length=10),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get articles from database (cached and fetched by scheduler)
-
-    Features:
-    - Redis caching (2 hours TTL)
-    - Pagination support
-    - Filter by category, topics, language
-    - Returns approved articles only
-    - Sorted by published date
-    """
     # Build cache key
     cache_key = build_article_list_key(
         page=page,
@@ -139,10 +122,6 @@ async def get_articles(
     return response
 
 
-# ============================================================================
-# MANUAL NEWS FETCH ENDPOINT (ADMIN)
-# ============================================================================
-
 @router.post("/fetch-now")
 async def fetch_news_now(
     queries: Optional[List[str]] = Query(None, description="Search queries"),
@@ -151,25 +130,15 @@ async def fetch_news_now(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Manually trigger news fetch using Celery task queue
-
-    This endpoint queues a Celery task for immediate news fetching.
-    The task runs asynchronously in the background.
-
-    Returns task ID for tracking.
-    """
     try:
         from app.utils.celery_helpers import trigger_manual_fetch
 
         # Trigger Celery task
         logger.info(f"Manual fetch triggered by user {user_id}")
 
-        # Use first query if multiple provided
-        query = queries[0] if queries else None
-
         result = await trigger_manual_fetch(
-            query=query,
+            query=queries[0] if queries else None,
+            queries=queries,
             sources=sources,
             limit=limit
         )
@@ -192,13 +161,9 @@ async def fetch_news_now(
         logger.error(f"Error in manual news fetch: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger news fetch: {str(e)}"
+            detail="Failed to trigger news fetch"
         )
 
-
-# ============================================================================
-# TASK STATUS ENDPOINT
-# ============================================================================
 
 @router.get("/task-status/{task_id}")
 async def get_task_status_endpoint(task_id: str):
@@ -216,10 +181,6 @@ async def get_task_status_endpoint(task_id: str):
             detail=str(e)
         )
 
-
-# ============================================================================
-# SCHEDULER STATUS ENDPOINT
-# ============================================================================
 
 @router.get("/scheduler/status")
 async def get_scheduler_status():
@@ -260,10 +221,6 @@ async def get_scheduler_status():
         }
 
 
-# ============================================================================
-# SCHEDULED TASKS INFO ENDPOINT
-# ============================================================================
-
 @router.get("/scheduler/tasks")
 async def get_scheduled_tasks():
     """Get information about scheduled periodic tasks"""
@@ -280,10 +237,6 @@ async def get_scheduled_tasks():
         )
 
 
-# ============================================================================
-# PERSONALIZED NEWS FEED
-# ============================================================================
-
 @router.get("/personalized", response_model=PersonalizedFeedResponse)
 async def get_personalized_news(
     page: int = Query(1, ge=1, le=100),
@@ -293,20 +246,6 @@ async def get_personalized_news(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get personalized news feed using RL-based recommendations
-
-    Features:
-    - Personalized ranking based on user preferences
-    - RL model recommendations
-    - Filters out already-read articles (optional)
-    - Relevance score filtering
-
-    Security:
-    - User authentication required
-    - Rate limited per user
-    - Input validation
-    """
     # Get user
     user_result = await db.execute(
         select(User).where(User.user_id == user_id)
@@ -422,25 +361,12 @@ async def get_personalized_news(
     )
 
 
-# ============================================================================
-# ARTICLE DETAILS
-# ============================================================================
-
 @router.get("/article/{article_id}", response_model=ArticleDetailResponse)
 async def get_article_detail(
     article_id: str,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get detailed article information with summary
-
-    Includes:
-    - Full article content
-    - Generated summary
-    - Related articles
-    - Engagement metrics
-    """
     from uuid import UUID
 
     try:
@@ -522,11 +448,6 @@ async def get_article_summary(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get article summary (generated or cached)
-
-    Generates a simple extractive summary on-demand
-    """
     from uuid import UUID
 
     try:
@@ -554,15 +475,17 @@ async def get_article_summary(
 
     # Return cached summary if available
     if article.excerpt:
+        excerpt_text = ContentSanitizer.sanitize_text(article.excerpt)
         return {
             "article_id": article.article_id,
-            "excerpt": article.excerpt,
-            "word_count": len(article.excerpt.split()),
+            "excerpt": excerpt_text,
+            "word_count": len(excerpt_text.split()),
             "cached": True
         }
 
     # Simple extraction of first few sentences
-    sentences = article.content.split('.')[:3]
+    clean_content = ContentSanitizer.sanitize_text(article.content)
+    sentences = clean_content.split('.')[:3]
     simple_summary = '. '.join(s.strip() for s in sentences if s.strip()) + '.'
 
     return {
@@ -574,30 +497,12 @@ async def get_article_summary(
     }
 
 
-# ============================================================================
-# TRENDING ARTICLES
-# ============================================================================
-
 @router.get("/trending", response_model=TrendingArticlesResponse)
 async def get_trending_articles(
     timeframe: str = Query("24h", pattern="^(24h|7d|30d)$"),
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get trending articles based on engagement metrics
-
-    Timeframes:
-    - 24h: Last 24 hours
-    - 7d: Last 7 days
-    - 30d: Last 30 days
-
-    Ranking factors:
-    - Total views
-    - Click-through rate
-    - Average time spent
-    - Recency
-    """
     # Calculate time threshold
     if timeframe == "24h":
         threshold = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -631,10 +536,6 @@ async def get_trending_articles(
     )
 
 
-# ============================================================================
-# SEARCH
-# ============================================================================
-
 @router.get("/search", response_model=SearchResultsResponse)
 async def search_articles(
     query: str = Query(..., min_length=1, max_length=500),
@@ -647,21 +548,6 @@ async def search_articles(
     sort_by: str = Query("relevance", pattern="^(relevance|date|popularity)$"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Search articles with filters
-
-    Features:
-    - Full-text search in title and content
-    - Topic filtering
-    - Source filtering
-    - Date range filtering
-    - Multiple sort options
-
-    Security:
-    - Input sanitization (via Pydantic)
-    - SQL injection prevention (parameterized queries)
-    - Rate limiting applied
-    """
     # Build search query
     search_query = select(Article).where(Article.is_active == True)
 
