@@ -2,6 +2,7 @@ from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
+from sqlalchemy import text
 import logging
 
 from config import settings
@@ -46,15 +47,27 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def init_db():
-    """Initialize database tables"""
-    async with engine.begin() as conn:
-        # Import all models to register them
-        from app.models import User, UserSession, UserFeedback, Article
+async def check_database_connection() -> bool:
+    """Verify database connectivity without mutating schema at runtime."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Database connectivity check failed: {e}")
+        return False
 
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created successfully")
+
+async def has_alembic_version_table() -> bool:
+    """Check whether Alembic version tracking table exists."""
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT to_regclass('public.alembic_version')"))
+            table_name = result.scalar()
+        return bool(table_name)
+    except Exception as e:
+        logger.warning(f"Failed to check Alembic version table: {e}")
+        return False
 
 
 async def close_db():

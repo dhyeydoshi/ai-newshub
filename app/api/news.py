@@ -7,43 +7,15 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.sanitizer import ContentSanitizer
-from app.services.article_persistence import article_persistence_service
 
 
 from config import settings
 from app.services.news_aggregator import get_news_aggregator, NewsAggregatorService
+from app.services.news_ingestion_service import NewsIngestionService, news_ingestion_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/news", tags=["News Aggregation"])
-
-
-class NewsQuery(BaseModel):
-    """News aggregation query parameters"""
-    query: Optional[str] = Field(None, max_length=500, description="Search query")
-    sources: Optional[List[str]] = Field(
-        None,
-        description="List of sources to fetch from (newsapi, gdelt, rss)"
-    )
-    topics: Optional[List[str]] = Field(
-        None,
-        description="Topic filters used for topic-specific RSS feed selection",
-    )
-    limit: int = Field(20, ge=1, le=100, description="Maximum number of articles")
-    deduplicate: bool = Field(True, description="Remove duplicate articles")
-    use_cache: bool = Field(True, description="Use cached results")
-    category: Optional[str] = Field(None, description="News category (for NewsAPI)")
-    language: str = Field("en", max_length=2, description="Language code")
-
-    @field_validator("sources")
-    @classmethod
-    def validate_sources(cls, v):
-        if v is not None:
-            valid_sources = {"newsapi", "gdelt", "rss"}
-            invalid = set(v) - valid_sources
-            if invalid:
-                raise ValueError(f"Invalid sources: {invalid}. Valid: {valid_sources}")
-        return v
 
 
 class RSSFeedQuery(BaseModel):
@@ -132,6 +104,10 @@ async def get_aggregator_service(
     )
 
 
+def get_ingestion_service() -> NewsIngestionService:
+    return news_ingestion_service
+
+
 @router.get("/aggregate", response_model=NewsResponse)
 async def aggregate_news(
     query: Optional[str] = Query(None, max_length=500, description="Search query"),
@@ -146,57 +122,39 @@ async def aggregate_news(
     category: Optional[str] = Query(None, description="Category for NewsAPI"),
     language: str = Query("en", max_length=2, description="Language code"),
     aggregator: NewsAggregatorService = Depends(get_aggregator_service),
+    ingestion_service: NewsIngestionService = Depends(get_ingestion_service),
     save_to_db: bool = Query(True, description="Save fetched articles to database"),
     db: AsyncSession = Depends(get_db)
 
 
 ):
     try:
-        # Parse sources
-        source_list = None
-        if sources:
-            source_list = [s.strip() for s in sources.split(",")]
-            valid_sources = {"newsapi", "gdelt", "rss"}
-            invalid = set(source_list) - valid_sources
-            if invalid:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid sources: {invalid}. Valid: {valid_sources}"
-                )
-        else:
-            source_list = list(settings.NEWS_SOURCES)
-            if settings.ENABLE_RSS_FEEDS and "rss" not in source_list:
-                source_list.append("rss")
-
-        feed_urls = None
-        if "rss" in source_list and settings.ENABLE_RSS_FEEDS:
-            feed_urls = settings.get_rss_feed_urls_for_topics(topics)
-
-        # Fetch articles
-        articles = await aggregator.aggregate_news(
+        result = await ingestion_service.aggregate_and_persist(
+            aggregator=aggregator,
+            db=db,
             query=query,
-            sources=source_list,
+            sources=sources,
             limit=limit,
             deduplicate=deduplicate,
             use_cache=use_cache,
             topics=topics,
             category=category,
             language=language,
-            feed_urls=feed_urls
+            save_to_db=save_to_db,
+            auto_approve=True,
         )
 
-        # Save to database if requested
-        if save_to_db and articles:
-            save_result = await article_persistence_service.save_articles(
-                articles=articles,
-                db=db,
-                auto_approve=True
-            )
-            logger.info(f"Saved articles: {save_result}")
-
-
-        # Determine which sources were used
-        sources_used = source_list or ["newsapi", "gdelt", "rss"]
+        articles = result["articles"]
+        sources_used = result["sources_used"]
+        save_stats = result["save_stats"]
+        pipeline_stats = result["pipeline_stats"]
+        logger.info(
+            "Aggregate request complete: sources=%s fetched=%s accepted=%s saved=%s",
+            sources_used,
+            pipeline_stats.get("input_count", 0),
+            pipeline_stats.get("accepted_count", 0),
+            save_stats.get("saved", 0),
+        )
 
         return NewsResponse(
             total=len(articles),
@@ -205,6 +163,8 @@ async def aggregate_news(
             cached=False  # Would need to track this in the service
         )
 
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error aggregating news: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to aggregate news")
@@ -213,13 +173,24 @@ async def aggregate_news(
 @router.post("/rss/fetch", response_model=NewsResponse)
 async def fetch_rss_feeds(
     query: RSSFeedQuery,
-    aggregator: NewsAggregatorService = Depends(get_aggregator_service)
+    aggregator: NewsAggregatorService = Depends(get_aggregator_service),
+    ingestion_service: NewsIngestionService = Depends(get_ingestion_service),
 ):
     try:
-        articles = await aggregator.fetch_from_rss_feeds(
+        result = await ingestion_service.fetch_rss_and_prepare(
+            aggregator=aggregator,
             feed_urls=query.feed_urls,
             limit_per_feed=query.limit_per_feed,
             deduplicate=query.deduplicate
+        )
+        articles = result["articles"]
+        pipeline_stats = result["pipeline_stats"]
+        logger.info(
+            "RSS fetch request complete: input=%s accepted=%s dropped_invalid=%s dropped_duplicates=%s",
+            pipeline_stats.get("input_count", 0),
+            pipeline_stats.get("accepted_count", 0),
+            pipeline_stats.get("dropped_invalid", 0),
+            pipeline_stats.get("dropped_duplicates", 0),
         )
 
         return NewsResponse(

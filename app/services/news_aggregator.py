@@ -486,6 +486,7 @@ class NewsAggregatorService:
         **kwargs
     ) -> List[Dict[str, Any]]:
         topics = _normalize_topic_values(kwargs.get('topics') or [])
+        source_limit = max(1, min(limit, settings.NEWS_MAX_ARTICLES_PER_SOURCE))
 
         cache_key = self.cache.build_key(
             source='all' if not sources else ','.join(sorted(sources)),
@@ -520,19 +521,19 @@ class NewsAggregatorService:
                 if feed_urls:
                     for url in feed_urls:
                         rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
-                        tasks.append(fetcher.fetch(feed_url=url, limit=limit, topic_hints=rss_topic_hints))
+                        tasks.append(fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints))
                 elif feed_url:
                     rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(feed_url))
-                    tasks.append(fetcher.fetch(feed_url=feed_url, limit=limit, topic_hints=rss_topic_hints))
+                    tasks.append(fetcher.fetch(feed_url=feed_url, limit=source_limit, topic_hints=rss_topic_hints))
                 elif query and query.startswith(('http://', 'https://')):
                     rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(query))
-                    tasks.append(fetcher.fetch(feed_url=query, limit=limit, topic_hints=rss_topic_hints))
+                    tasks.append(fetcher.fetch(feed_url=query, limit=source_limit, topic_hints=rss_topic_hints))
                 elif settings.ENABLE_RSS_FEEDS and settings.RSS_FEED_URLS:
                     for url in settings.RSS_FEED_URLS:
                         rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
-                        tasks.append(fetcher.fetch(feed_url=url, limit=limit, topic_hints=rss_topic_hints))
+                        tasks.append(fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints))
             else:
-                tasks.append(fetcher.fetch(query=query, limit=limit, topic_hints=topics, **kwargs))
+                tasks.append(fetcher.fetch(query=query, limit=source_limit, topic_hints=topics, **kwargs))
 
         # Execute all fetches concurrently
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -571,12 +572,13 @@ class NewsAggregatorService:
     ) -> List[Dict[str, Any]]:
         """Fetch from multiple RSS feeds."""
         rss_fetcher = self.fetchers['rss']
+        source_limit = max(1, min(limit_per_feed, settings.NEWS_MAX_ARTICLES_PER_SOURCE))
 
         tasks = []
         for url in feed_urls:
             rss_topic_hints = self._topics_for_feed_url(url)
             tasks.append(
-                rss_fetcher.fetch(feed_url=url, limit=limit_per_feed, topic_hints=rss_topic_hints)
+                rss_fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints)
             )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

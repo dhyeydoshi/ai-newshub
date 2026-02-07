@@ -37,6 +37,7 @@ async def _async_fetch_and_save_news(
         # Import here to avoid circular imports
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
+        from app.services.news_ingestion_service import news_ingestion_service
         from app.core.database import AsyncSessionLocal
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
@@ -91,11 +92,15 @@ async def _async_fetch_and_save_news(
                             use_cache=False,
                             topics=topic_hint
                         )
+                        prepared_articles, pipeline_stats = news_ingestion_service.prepare_articles_for_persistence(
+                            articles,
+                            topic_hints=topic_hint
+                        )
 
-                        if articles:
+                        if prepared_articles:
                             # Save to database
                             stats = await article_persistence_service.save_articles(
-                                articles=articles,
+                                articles=prepared_articles,
                                 db=db,
                                 auto_approve=True
                             )
@@ -107,7 +112,9 @@ async def _async_fetch_and_save_news(
                             logger.info(
                                 f"Query '{query}': Saved {stats['saved']}, "
                                 f"Duplicates {stats['duplicates']}, "
-                                f"Errors {stats['errors']}"
+                                f"Errors {stats['errors']}, "
+                                f"Pipeline accepted {pipeline_stats['accepted_count']}/"
+                                f"{pipeline_stats['input_count']}"
                             )
                     except Exception as e:
                         logger.error(f"Error fetching for query '{query}': {e}", exc_info=True)
@@ -168,6 +175,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
         # Import here to avoid circular imports
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
+        from app.services.news_ingestion_service import news_ingestion_service
         from app.core.database import AsyncSessionLocal
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
@@ -187,7 +195,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
 
         try:
             # Initialize cache manager
-            cache_manager = init_cache_manager(
+            init_cache_manager(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
@@ -201,12 +209,15 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                 cache_ttl=settings.NEWS_CACHE_TTL
             )
 
-            # Fetch articles from RSS feeds
-            articles = await aggregator.fetch_from_rss_feeds(
+            # Fetch and normalize articles from RSS feeds
+            pipeline_result = await news_ingestion_service.fetch_rss_and_prepare(
+                aggregator=aggregator,
                 feed_urls=feed_urls,
                 limit_per_feed=20,
-                deduplicate=True
+                deduplicate=True,
             )
+            articles = pipeline_result["articles"]
+            pipeline_stats = pipeline_result["pipeline_stats"]
 
             if articles:
                 # Save to database
@@ -220,7 +231,9 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                     logger.info(
                         f"RSS fetch complete: Saved {stats['saved']}, "
                         f"Duplicates {stats['duplicates']}, "
-                        f"Errors {stats['errors']}"
+                        f"Errors {stats['errors']}, "
+                        f"Pipeline accepted {pipeline_stats['accepted_count']}/"
+                        f"{pipeline_stats['input_count']}"
                     )
 
                     # Invalidate cache if new articles were saved
@@ -323,6 +336,7 @@ async def _async_fetch_news_manual(
     try:
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
+        from app.services.news_ingestion_service import news_ingestion_service
         from app.core.database import AsyncSessionLocal
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
@@ -363,10 +377,15 @@ async def _async_fetch_news_manual(
                 topics=[query] if query else None
             )
 
-            if articles:
+            prepared_articles, pipeline_stats = news_ingestion_service.prepare_articles_for_persistence(
+                articles,
+                topic_hints=[query] if query else None
+            )
+
+            if prepared_articles:
                 async with AsyncSessionLocal() as db:
                     stats = await article_persistence_service.save_articles(
-                        articles=articles,
+                        articles=prepared_articles,
                         db=db,
                         auto_approve=True
                     )
@@ -380,6 +399,7 @@ async def _async_fetch_news_manual(
                     return {
                         'status': 'success',
                         'statistics': stats,
+                        'pipeline': pipeline_stats,
                         'timestamp': datetime.now(timezone.utc).isoformat(),
                         'cache_invalidated': stats.get('saved', 0) > 0
                     }

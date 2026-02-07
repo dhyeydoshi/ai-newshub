@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
         # Initialize centralized cache manager
         from app.core.cache import init_cache_manager
-        cache_manager = init_cache_manager(
+        init_cache_manager(
             redis_client,
             default_ttl=settings.REDIS_CACHE_TTL,
             compression_threshold=1024,  # Compress values > 1KB
@@ -63,12 +63,27 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Redis connection failed: {e}. Rate limiting and caching will be disabled.")
         redis_client = None
 
-    # Initialize database tables (if needed)
+    # Verify database connectivity and migration readiness
     try:
-        from app.core.database import init_db
-        logger.info("Database ready")
+        from app.core.database import check_database_connection, has_alembic_version_table
+
+        db_connected = await check_database_connection()
+        if not db_connected:
+            logger.error("Database is unreachable at startup")
+        else:
+            logger.info("Database connection ready")
+
+        if db_connected:
+            alembic_ready = await has_alembic_version_table()
+            if not alembic_ready:
+                logger.warning(
+                    "Alembic version table was not found. "
+                    "Schema should be managed via migrations; run 'alembic upgrade head'."
+                )
+            else:
+                logger.info("Alembic migration tracking detected")
     except Exception as e:
-        logger.error(f"Database initialization error: {e}")
+        logger.error(f"Database startup check error: {e}")
 
     # Celery runs independently - no initialization needed in FastAPI
     if settings.ENABLE_NEWS_SCHEDULER:

@@ -44,6 +44,8 @@ class ArticlePersistenceService:
 
         # Build list of articles to insert
         articles_to_insert: List[Article] = []
+        seen_urls: Set[str] = set(existing_urls)
+        seen_hashes: Set[str] = set(existing_hashes)
         saved_count = 0
         duplicate_count = 0
         error_count = 0
@@ -53,11 +55,11 @@ class ArticlePersistenceService:
                 url = data.get('url', '')
                 content_hash = data.get('content_hash', '')
 
-                # Skip if URL or content hash already exists
-                if url in existing_urls:
+                # Skip if URL or content hash already exists (DB or current batch)
+                if not url or url in seen_urls:
                     duplicate_count += 1
                     continue
-                if content_hash and content_hash in existing_hashes:
+                if content_hash and content_hash in seen_hashes:
                     duplicate_count += 1
                     continue
 
@@ -89,6 +91,9 @@ class ArticlePersistenceService:
                     click_through_rate=0.0
                 )
                 articles_to_insert.append(article)
+                seen_urls.add(url)
+                if content_hash:
+                    seen_hashes.add(content_hash)
                 saved_count += 1
 
             except Exception as e:
