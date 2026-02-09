@@ -231,12 +231,14 @@ pip install -r requirements.txt
 streamlit run Home.py
 ```
 
-Set frontend API target in `frontend/.env`:
+Set frontend API target with environment variables:
 
 ```env
 API_BASE_URL=http://localhost:8000
 API_VERSION=v1
 ```
+
+For Docker Compose, set `FRONTEND_API_BASE_URL` (default is `http://api:8000`).
 
 ## RL and Training Scripts
 
@@ -276,5 +278,4 @@ Current ingestion sanitizes to plain text. Re-ingest older records if legacy row
 For free-tier cloud deployment (OCI recommended for this architecture), run API + worker + beat + Redis + Postgres with process separation.
 
 Do not rely on runtime schema creation; always run migrations during deploy.
-
 

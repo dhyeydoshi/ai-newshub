@@ -89,7 +89,8 @@ async def lifespan(app: FastAPI):
     if settings.ENABLE_NEWS_SCHEDULER:
         logger.info(
             "News fetching is handled by Celery worker. "
-            "Start worker with: celery -A app.celery_config:celery_app worker --beat --loglevel=info"
+            "Start worker with: celery -A app.celery_config:celery_app worker --loglevel=info "
+            "and run beat separately: celery -A app.celery_config:celery_app beat --loglevel=info"
         )
         try:
             from app.utils.celery_helpers import get_celery_status

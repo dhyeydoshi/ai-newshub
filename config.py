@@ -1,6 +1,5 @@
 ﻿import json
 import warnings
-from email.policy import default
 from typing import Dict, List, Optional
 from pydantic import Field, field_validator, model_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +7,10 @@ from functools import lru_cache
 import secrets
 from pathlib import Path
 from urllib.parse import quote_plus
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -155,7 +158,7 @@ class Settings(BaseSettings):
             if private_key_path.exists():
                 try:
                     self.JWT_PRIVATE_KEY = private_key_path.read_text()
-                    print(f"Loaded JWT private key from {private_key_path}")
+                    logger.info(f"Loaded JWT private key from {private_key_path}")
                 except Exception as e:
                     warnings.warn(
                         f"Failed to load private key from {private_key_path}: {e}. "
@@ -180,7 +183,7 @@ class Settings(BaseSettings):
             if public_key_path.exists():
                 try:
                     self.JWT_PUBLIC_KEY = public_key_path.read_text()
-                    print(f"Loaded JWT public key from {public_key_path}")
+                    logger.info(f"Loaded JWT public key from {public_key_path}")
                 except Exception as e:
                     warnings.warn(
                         f"Failed to load public key from {public_key_path}: {e}",
@@ -223,7 +226,6 @@ class Settings(BaseSettings):
     def parse_cors_origins(cls, v) -> List[str]:
         """Parse CORS origins from comma-separated string"""
         if isinstance(v, str):
-            print([origin.strip() for origin in v.split(",") if origin.strip()])
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
@@ -616,10 +618,8 @@ def get_settings() -> Settings:
     settings = Settings()
     issues = settings.validate_configuration()
     if issues:
-        print("\n  Configuration Issues Found:")
         for issue in issues:
-            print(f"  - {issue}")
-        print()
+            logger.warning(f"Configuration issue: {issue}")
     return settings
 
 

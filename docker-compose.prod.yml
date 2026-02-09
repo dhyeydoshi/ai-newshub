@@ -1,0 +1,63 @@
+﻿services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  celery-worker:
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  celery-beat:
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  frontend:
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      DEBUG: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  nginx:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    ports:
+      - "127.0.0.1:3000:3000"
