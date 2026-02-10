@@ -1,0 +1,61 @@
+﻿services:
+  postgres:
+    command: >
+      postgres
+      -c shared_buffers=96MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+      -c max_connections=40
+    mem_limit: 192m
+    mem_reservation: 128m
+    cpus: "0.30"
+
+  redis:
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    mem_limit: 96m
+    mem_reservation: 64m
+    cpus: "0.20"
+
+  api:
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips '*'"
+    environment:
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 10
+    mem_limit: 240m
+    mem_reservation: 176m
+    cpus: "0.45"
+    pids_limit: 256
+
+  celery-worker:
+    command: celery -A app.celery_config:celery_app worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat --loglevel=warning
+    environment:
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 10
+    mem_limit: 160m
+    mem_reservation: 112m
+    cpus: "0.30"
+    pids_limit: 192
+
+  celery-beat:
+    command: celery -A app.celery_config:celery_app beat --loglevel=warning
+    environment:
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 10
+    mem_limit: 64m
+    mem_reservation: 48m
+    cpus: "0.10"
+    pids_limit: 128
+
+  frontend:
+    mem_limit: 128m
+    mem_reservation: 96m
+    cpus: "0.20"
+    pids_limit: 192
+
+  nginx:
+    mem_limit: 48m
+    mem_reservation: 24m
+    cpus: "0.05"
+    pids_limit: 128

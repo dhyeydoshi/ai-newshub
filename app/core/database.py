@@ -4,6 +4,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 import logging
+import os
 
 from config import settings
 
@@ -12,18 +13,46 @@ logger = logging.getLogger(__name__)
 # Create declarative base
 Base = declarative_base()
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True,
-    pool_pre_ping=True,
-    # For async engines, only use NullPool for testing, otherwise let SQLAlchemy choose the pool
-    poolclass=NullPool if settings.ENVIRONMENT == "testing" else None,
-    pool_size=20,  # Increased from 10 for better concurrency
-    max_overflow=30,  # Increased from 20
-    pool_recycle=3600,  # Recycle connections after 1 hour
-    pool_timeout=30,  # Wait up to 30s for a connection
-)
+
+def _get_pool_config() -> dict:
+    environment = (settings.ENVIRONMENT or "production").lower()
+
+    if environment == "testing":
+        return {"poolclass": NullPool}
+
+    # Keep production concurrency higher than development, but configurable via env vars.
+    if environment == "production":
+        defaults = {
+            "pool_size": 5,
+            "max_overflow": 5,
+            "pool_recycle": 900,
+            "pool_timeout": 15,
+        }
+    else:
+        defaults = {
+            "pool_size": 20,
+            "max_overflow": 30,
+            "pool_recycle": 3600,
+            "pool_timeout": 30,
+        }
+
+    return {
+        "pool_size": int(os.getenv("DB_POOL_SIZE", str(defaults["pool_size"]))),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", str(defaults["max_overflow"]))),
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", str(defaults["pool_recycle"]))),
+        "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", str(defaults["pool_timeout"]))),
+    }
+
+
+_pool_config = _get_pool_config()
+_engine_kwargs = {
+    "echo": settings.DEBUG,
+    "future": True,
+    "pool_pre_ping": True,
+}
+_engine_kwargs.update(_pool_config)
+
+engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 
 # Create async session factory
 AsyncSessionLocal = async_sessionmaker(
