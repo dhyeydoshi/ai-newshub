@@ -48,10 +48,6 @@ services:
     mem_reservation: 96m
     cpus: "0.30"
     pids_limit: 192
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   celery-worker:
     command: celery -A app.celery_config:celery_app worker --pool=solo --concurrency=1 --max-tasks-per-child=50 --without-gossip --without-mingle --without-heartbeat --loglevel=warning
@@ -71,10 +67,6 @@ services:
     mem_reservation: 80m
     cpus: "0.20"
     pids_limit: 160
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   celery-beat:
     command: celery -A app.celery_config:celery_app beat --loglevel=warning
@@ -93,10 +85,6 @@ services:
     mem_reservation: 40m
     cpus: "0.05"
     pids_limit: 128
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   frontend:
     profiles:
@@ -106,7 +94,3 @@ services:
     mem_reservation: 80m
     cpus: "0.10"
     pids_limit: 160
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
