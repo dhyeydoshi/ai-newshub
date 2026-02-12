@@ -1,0 +1,291 @@
+﻿services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-news_summarizer}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-news_summarizer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - news-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - news-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: >
+      sh -c "alembic upgrade head &&
+      exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --proxy-headers --forwarded-allow-ips '*'"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://localhost:8000}
+
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
+
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 50s
+    networks:
+      - news-network
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.celery_config:celery_app worker --loglevel=info --concurrency=2
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.celery_config:celery_app beat --loglevel=info
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://api:8000}
+      API_VERSION: ${FRONTEND_API_VERSION:-v1}
+      DEBUG: ${DEBUG:-false}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - news-network
+    profiles:
+      - with-nginx
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - news-network
+    profiles:
+      - with-monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - news-network
+    profiles:
+      - with-monitoring
+
+networks:
+  news-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
