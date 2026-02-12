@@ -49,6 +49,27 @@ from app.schemas.feedback import (
     UserEngagementAnalytics,
     EngagementAnalyticsResponse
 )
+from app.schemas.integration import (
+    APIKeyCreateRequest,
+    APIKeyCreateResponse,
+    APIKeyResponse,
+    APIKeyListResponse,
+    FeedFilters,
+    FeedCreateRequest,
+    FeedUpdateRequest,
+    FeedResponse,
+    FeedListResponse,
+    BundleCreateRequest,
+    BundleUpdateRequest,
+    BundleResponse,
+    BundleListResponse,
+    WebhookCreateRequest,
+    WebhookUpdateRequest,
+    WebhookResponse,
+    WebhookTestResponse,
+    FeedItemResponse,
+    IntegrationFeedResponse,
+)
 
 __all__ = [
     # Auth schemas
@@ -96,5 +117,25 @@ __all__ = [
     "InteractionResponse",
     "EngagementMetrics",
     "UserEngagementAnalytics",
-    "EngagementAnalyticsResponse"
+    "EngagementAnalyticsResponse",
+    # Integration schemas
+    "APIKeyCreateRequest",
+    "APIKeyCreateResponse",
+    "APIKeyResponse",
+    "APIKeyListResponse",
+    "FeedFilters",
+    "FeedCreateRequest",
+    "FeedUpdateRequest",
+    "FeedResponse",
+    "FeedListResponse",
+    "BundleCreateRequest",
+    "BundleUpdateRequest",
+    "BundleResponse",
+    "BundleListResponse",
+    "WebhookCreateRequest",
+    "WebhookUpdateRequest",
+    "WebhookResponse",
+    "WebhookTestResponse",
+    "FeedItemResponse",
+    "IntegrationFeedResponse",
 ]

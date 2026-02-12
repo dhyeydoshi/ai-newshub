@@ -197,11 +197,48 @@ def build_search_key(
     return f"search:{query_hash}:{page}:{page_size}"
 
 
+def build_integration_feed_key(
+    feed_slug: str,
+    owner: Optional[str] = None,
+    limit: int = 20,
+    since: Optional[Any] = None,
+    sort: str = "date",
+    fmt: str = "json",
+    **kwargs
+) -> str:
+    since_part = str(since) if since else "none"
+    owner_part = owner or "public"
+    return f"integration:feed:{owner_part}:{feed_slug}:{fmt}:{limit}:{sort}:{since_part}"
+
+
+def build_integration_bundle_key(
+    bundle_slug: str,
+    owner: Optional[str] = None,
+    limit: int = 20,
+    since: Optional[Any] = None,
+    sort: str = "date",
+    fmt: str = "json",
+    **kwargs
+) -> str:
+    since_part = str(since) if since else "none"
+    owner_part = owner or "public"
+    return f"integration:bundle:{owner_part}:{bundle_slug}:{fmt}:{limit}:{sort}:{since_part}"
+
+
+async def invalidate_integration_feed_cache(feed_slug: str):
+    await invalidate_cache_pattern(f"integration:feed:*:{feed_slug}:*")
+
+
+async def invalidate_integration_bundle_cache(bundle_slug: str):
+    await invalidate_cache_pattern(f"integration:bundle:*:{bundle_slug}:*")
+
+
 # Cache invalidation helpers
 
 async def invalidate_article_cache():
     """Invalidate all article-related cache"""
     await invalidate_cache_pattern("articles:*")
+    await invalidate_cache_pattern("integration:*")
 
 
 async def invalidate_user_cache(user_id: str):

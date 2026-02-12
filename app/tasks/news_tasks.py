@@ -4,6 +4,7 @@ from typing import Optional, List
 import asyncio
 
 from app.celery_config import celery_app
+from app.core.redis_keys import redis_key
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def _async_fetch_and_save_news(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
             logger.info("Cache manager initialized for task")
 
@@ -136,7 +137,7 @@ async def _async_fetch_and_save_news(
 
                 # Update last fetch timestamp in Redis
                 await redis_client.set(
-                    'news:last_fetch_timestamp',
+                    redis_key("news", "last_fetch_timestamp"),
                     datetime.now(timezone.utc).isoformat(),
                     ex=86400  # Expire after 24 hours
                 )
@@ -199,7 +200,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
 
             # Create aggregator
@@ -357,7 +358,7 @@ async def _async_fetch_news_manual(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
 
             # Create aggregator

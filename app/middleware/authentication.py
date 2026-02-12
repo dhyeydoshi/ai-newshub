@@ -121,7 +121,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return True
 
         # Check if path starts with public prefix
-        public_prefixes = ["/docs", "/redoc", "/openapi.json", "/static"]
+        public_prefixes = ["/docs", "/redoc", "/openapi.json", "/static", "/api/v1/integration"]
         return any(path.startswith(prefix) for prefix in public_prefixes)
 
     def _extract_token(self, request: Request) -> Optional[str]:

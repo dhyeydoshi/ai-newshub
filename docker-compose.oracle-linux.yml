@@ -1,0 +1,111 @@
+services:
+  postgres:
+    command: >
+      postgres
+      -c shared_buffers=32MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=16MB
+      -c effective_cache_size=128MB
+      -c max_connections=20
+      -c wal_buffers=4MB
+    mem_limit: 150m
+    mem_reservation: 120m
+    cpus: "0.30"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  redis:
+    command: redis-server --appendonly no --save "" --maxmemory 50mb --maxmemory-policy allkeys-lru
+    mem_limit: 80m
+    mem_reservation: 64m
+    cpus: "0.10"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    command: >
+      sh -c "alembic upgrade head &&
+      exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --limit-concurrency 20 --timeout-keep-alive 10 --proxy-headers --forwarded-allow-ips '*'"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 8
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 0
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-300}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-300}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+    mem_limit: 120m
+    mem_reservation: 96m
+    cpus: "0.30"
+    pids_limit: 192
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  celery-worker:
+    command: celery -A app.celery_config:celery_app worker --pool=solo --concurrency=1 --max-tasks-per-child=50 --without-gossip --without-mingle --without-heartbeat --loglevel=warning
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 6
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 0
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+    mem_limit: 100m
+    mem_reservation: 80m
+    cpus: "0.20"
+    pids_limit: 160
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  celery-beat:
+    command: celery -A app.celery_config:celery_app beat --loglevel=warning
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: WARNING
+      REDIS_MAX_CONNECTIONS: 4
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 0
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+    mem_limit: 50m
+    mem_reservation: 40m
+    cpus: "0.05"
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  frontend:
+    profiles:
+      - with-frontend
+    mem_limit: 100m
+    mem_reservation: 80m
+    cpus: "0.10"
+    pids_limit: 160
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

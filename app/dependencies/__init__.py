@@ -1,4 +1,4 @@
-from .rate_limit import check_rate_limit, rate_limit, RateLimitPresets
+from .rate_limit import check_rate_limit, check_integration_rate_limit, rate_limit, RateLimitPresets
 from .cache import (
     cache_endpoint,
     CacheConfig,
@@ -7,14 +7,19 @@ from .cache import (
     invalidate_cache_pattern,
     invalidate_article_cache,
     invalidate_user_cache,
+    invalidate_integration_feed_cache,
+    invalidate_integration_bundle_cache,
     build_article_list_key,
     build_article_detail_key,
     build_user_profile_key,
-    build_recommendations_key
+    build_recommendations_key,
+    build_integration_feed_key,
+    build_integration_bundle_key,
 )
 
 __all__ = [
     'check_rate_limit',
+    'check_integration_rate_limit',
     'rate_limit',
     'RateLimitPresets',
     'cache_endpoint',
@@ -24,8 +29,12 @@ __all__ = [
     'invalidate_cache_pattern',
     'invalidate_article_cache',
     'invalidate_user_cache',
+    'invalidate_integration_feed_cache',
+    'invalidate_integration_bundle_cache',
     'build_article_list_key',
     'build_article_detail_key',
     'build_user_profile_key',
-    'build_recommendations_key'
+    'build_recommendations_key',
+    'build_integration_feed_key',
+    'build_integration_bundle_key',
 ]

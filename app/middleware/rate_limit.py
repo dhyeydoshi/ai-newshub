@@ -3,6 +3,7 @@ import hashlib
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import redis.asyncio as aioredis
+from app.core.redis_keys import redis_key
 from config import settings
 import logging
 
@@ -21,9 +22,9 @@ class RateLimiter:
 
     async def check_rate_limit(self, identifier: str) -> tuple[bool, Dict[str, Any]]:
         current_time = int(time.time())
-        minute_key = f"rate_limit:{identifier}:{current_time // 60}"
-        violation_key = f"violations:{identifier}"
-        ban_key = f"ban:{identifier}"
+        minute_key = redis_key("rate_limit", identifier, current_time // 60)
+        violation_key = redis_key("violations", identifier)
+        ban_key = redis_key("ban", identifier)
 
         # Check if user is banned
         is_banned = await self.redis.exists(ban_key)
@@ -108,9 +109,9 @@ class RateLimiter:
 
     async def get_user_stats(self, identifier: str) -> Dict[str, Any]:
         current_time = int(time.time())
-        minute_key = f"rate_limit:{identifier}:{current_time // 60}"
-        violation_key = f"violations:{identifier}"
-        ban_key = f"ban:{identifier}"
+        minute_key = redis_key("rate_limit", identifier, current_time // 60)
+        violation_key = redis_key("violations", identifier)
+        ban_key = redis_key("ban", identifier)
 
         count = await self.redis.get(minute_key)
         violations = await self.redis.get(violation_key)
@@ -131,9 +132,9 @@ class RateLimiter:
 
     async def reset_user_limits(self, identifier: str) -> bool:
         current_time = int(time.time())
-        minute_key = f"rate_limit:{identifier}:{current_time // 60}"
-        violation_key = f"violations:{identifier}"
-        ban_key = f"ban:{identifier}"
+        minute_key = redis_key("rate_limit", identifier, current_time // 60)
+        violation_key = redis_key("violations", identifier)
+        ban_key = redis_key("ban", identifier)
 
         await self.redis.delete(minute_key, violation_key, ban_key)
         logger.info(f"Rate limiter: Reset all limits for {identifier}")

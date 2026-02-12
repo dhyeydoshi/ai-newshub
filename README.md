@@ -12,6 +12,13 @@ This README reflects the current codebase and recent refactors.
 - Article text is normalized to plain text (HTML tags stripped).
 - Celery worker health warning is emitted at app startup when zero workers are active.
 - Frontend + backend logout flows are implemented (`/auth/logout`, `/auth/logout-all`).
+- Integration pull endpoints enforce API key scope (`feed:read`) and strict `sort` validation (`date|relevance`).
+- Webhook delivery security hardening is active:
+  - Telegram chat id + bot token format validation
+  - HTML-escaped email rendering for article fields
+  - Redacted external HTTP errors persisted to delivery jobs
+- Webhook planner uses Redis lock to prevent duplicate batch planning runs.
+- Webhook test endpoint has dedicated throttling.
 
 ## Core Features
 
@@ -101,6 +108,12 @@ CORS_ORIGINS=http://localhost:8501,http://localhost:8000
 
 NEWSAPI_KEY=
 ENABLE_RSS_FEEDS=true
+
+ENABLE_INTEGRATION_API=true
+ENABLE_INTEGRATION_DELIVERY=true
+INTEGRATION_KEY_HEADER=X-Integration-Key
+INTEGRATION_ENCRYPTION_KEY_CURRENT=<fernet-key>
+INTEGRATION_WEBHOOK_TEST_RATE_LIMIT_PER_HOUR=30
 ```
 
 ## Database and Migrations
@@ -145,6 +158,44 @@ Or use project scripts:
 
 - `start_celery.bat`
 - `start_celery.sh`
+
+## Phase 5 Validation
+
+Run end-to-end integration validation (auth, integration key/feed/bundle/webhook, optional Celery checks):
+
+```bash
+python scripts/validate_phase5_e2e.py --base-url http://localhost:8000
+```
+
+Useful options:
+
+- `--no-run-celery-checks` to skip Celery inspect checks
+- `--no-cleanup` to keep created resources for manual inspection
+- `--email <existing-email> --password <password>` to reuse an existing user
+
+Integration delivery operations:
+
+- Celery beat schedules:
+  - `plan_webhook_batches` every 5 minutes (when integration delivery enabled)
+  - `flush_api_key_usage` every 10 minutes (when integration API enabled)
+  - `cleanup_integration_delivery_history` daily at 04:30 UTC (when integration API enabled)
+
+## Integration Security Notes
+
+- Public integration endpoints require:
+  - valid integration key
+  - required scope (`feed:read`)
+  - per-key rate limit
+- Query validation:
+  - `sort` supports only `date` or `relevance`
+- Webhook validation:
+  - Telegram target must be a valid chat id / channel username
+  - Telegram bot token must match expected token format
+  - URL targets are HTTPS-only and blocked for private/local networks
+- Delivery safety:
+  - Planner acquires distributed Redis lock before scheduling
+  - External webhook error payloads are redacted before persistence
+  - Webhook test endpoint is rate-limited separately from management APIs
 
 ## News Ingestion Pipeline
 
@@ -220,6 +271,10 @@ When topics are provided from UI/API, ingestion uses mapped RSS feeds and persis
   - `/api/v1/feedback/*`
   - `/api/v1/analytics/*`
   - `GET /api/v1/recommendations/`
+- Integration APIs:
+  - Management (auth required): `/api/v1/integrations/*`
+  - Pull feeds (integration key required): `/api/v1/integration/feeds/{slug}`, `/rss`, `/atom`
+  - Pull bundles (integration key required): `/api/v1/integration/bundles/{slug}`, `/rss`, `/atom`
 
 ## Frontend
 
@@ -278,4 +333,3 @@ Current ingestion sanitizes to plain text. Re-ingest older records if legacy row
 For free-tier cloud deployment (OCI recommended for this architecture), run API + worker + beat + Redis + Postgres with process separation.
 
 Do not rely on runtime schema creation; always run migrations during deploy.
-

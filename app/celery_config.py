@@ -7,13 +7,21 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+CELERY_NAMESPACE = settings.REDIS_KEY_PREFIX.replace(":", "_")
+
+
+def _queue_name(base_name: str) -> str:
+    return f"{CELERY_NAMESPACE}.{base_name}"
+
+
 # Initialize Celery app
 celery_app = Celery(
-    'news_aggregator',
+    f'{CELERY_NAMESPACE}.news_aggregator',
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
-        'app.tasks.news_tasks'
+        'app.tasks.news_tasks',
+        'app.tasks.webhook_tasks',
     ]
 )
 
@@ -49,32 +57,51 @@ celery_app.conf.update(
     broker_connection_max_retries=10,
 
     # Queue settings
-    task_default_queue='news_tasks',
-    task_default_exchange='news_tasks',
+    task_default_queue=_queue_name('news_tasks'),
+    task_default_exchange=_queue_name('news_tasks'),
     task_default_routing_key='news.default',
 
     # Task routing
     task_routes={
         'app.tasks.news_tasks.fetch_and_save_news': {
-            'queue': 'news_fetch',
+            'queue': _queue_name('news_fetch'),
             'routing_key': 'news.fetch'
         },
         'app.tasks.news_tasks.fetch_rss_feeds': {
-            'queue': 'news_rss',
+            'queue': _queue_name('news_rss'),
             'routing_key': 'news.rss'
         },
         'app.tasks.news_tasks.cleanup_old_articles': {
-            'queue': 'news_maintenance',
+            'queue': _queue_name('news_maintenance'),
             'routing_key': 'news.maintenance'
+        },
+        'app.tasks.webhook_tasks.plan_webhook_batches': {
+            'queue': _queue_name('integration_planner'),
+            'routing_key': 'integration.plan'
+        },
+        'app.tasks.webhook_tasks.deliver_webhook_batch': {
+            'queue': _queue_name('integration_delivery'),
+            'routing_key': 'integration.deliver'
+        },
+        'app.tasks.webhook_tasks.flush_api_key_usage': {
+            'queue': _queue_name('integration_maintenance'),
+            'routing_key': 'integration.maintenance'
+        },
+        'app.tasks.webhook_tasks.cleanup_integration_delivery_history': {
+            'queue': _queue_name('integration_maintenance'),
+            'routing_key': 'integration.maintenance'
         }
     },
 
     # Define queues
     task_queues=(
-        Queue('news_fetch', routing_key='news.fetch'),
-        Queue('news_rss', routing_key='news.rss'),
-        Queue('news_maintenance', routing_key='news.maintenance'),
-        Queue('news_tasks', routing_key='news.default'),
+        Queue(_queue_name('news_fetch'), routing_key='news.fetch'),
+        Queue(_queue_name('news_rss'), routing_key='news.rss'),
+        Queue(_queue_name('news_maintenance'), routing_key='news.maintenance'),
+        Queue(_queue_name('news_tasks'), routing_key='news.default'),
+        Queue(_queue_name('integration_planner'), routing_key='integration.plan'),
+        Queue(_queue_name('integration_delivery'), routing_key='integration.deliver'),
+        Queue(_queue_name('integration_maintenance'), routing_key='integration.maintenance'),
     ),
 
     # Logging
@@ -112,6 +139,36 @@ celery_app.conf.beat_schedule = {
         }
     },
 }
+
+if settings.ENABLE_INTEGRATION_API:
+    celery_app.conf.beat_schedule.update(
+        {
+            'flush-integration-key-usage-every-10-minutes': {
+                'task': 'app.tasks.webhook_tasks.flush_api_key_usage',
+                'schedule': crontab(minute='*/10'),
+                'options': {'expires': 600},
+            },
+            'cleanup-integration-delivery-history-daily': {
+                'task': 'app.tasks.webhook_tasks.cleanup_integration_delivery_history',
+                'schedule': crontab(hour=4, minute=30),
+                'options': {'expires': 7200},
+            },
+        }
+    )
+
+if settings.ENABLE_INTEGRATION_API and settings.ENABLE_INTEGRATION_DELIVERY:
+    celery_app.conf.beat_schedule.update(
+        {
+            'plan-webhook-batches-every-5-minutes': {
+                'task': 'app.tasks.webhook_tasks.plan_webhook_batches',
+                'schedule': crontab(minute='*/5'),
+                'options': {'expires': 300},
+            }
+        }
+    )
+
+# Ensure task modules are registered for worker/inspect tooling.
+celery_app.autodiscover_tasks(["app"], related_name="tasks", force=True)
 
 # Task error handlers
 @celery_app.task(bind=True)

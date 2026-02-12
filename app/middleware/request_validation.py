@@ -17,6 +17,7 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         "authorization",
         "cookie",
         "x-api-key",
+        "x-integration-key",
         "x-auth-token",
         "proxy-authorization"
     }
@@ -32,6 +33,14 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         "credit_card",
         "ssn",
         "cvv"
+    }
+    SENSITIVE_QUERY_PARAMS: Set[str] = {
+        "token",
+        "api_key",
+        "integration_key",
+        "key",
+        "access_token",
+        "refresh_token",
     }
 
     def __init__(self, app):
@@ -136,7 +145,7 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
             log_data = {
                 "method": request.method,
                 "path": request.url.path,
-                "query_params": str(request.query_params),
+                "query_params": self._sanitize_query_params(request),
                 "client_ip": request.client.host if request.client else "unknown",
                 "user_agent": request.headers.get("user-agent", "unknown"),
                 "headers": safe_headers
@@ -188,4 +197,13 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
             return [self._sanitize_data(item) for item in data]
         else:
             return data
+
+    def _sanitize_query_params(self, request: Request) -> dict:
+        sanitized = {}
+        for key, value in request.query_params.multi_items():
+            if key.lower() in self.SENSITIVE_QUERY_PARAMS:
+                sanitized[key] = "***REDACTED***"
+            else:
+                sanitized[key] = value
+        return sanitized
 

@@ -16,6 +16,7 @@ from tenacity import (
 )
 import logging
 
+from app.core.redis_keys import redis_key
 from app.schemas.raw_article import RawArticle
 from app.utils.date_parser import parse_iso_date, parse_gdelt_date, parse_rss_date
 from config import settings
@@ -435,7 +436,7 @@ class NewsCacheManager:
             parts.append(query)
         for k, v in sorted(kwargs.items()):
             parts.append(f"{k}:{v}")
-        return f"news:{':'.join(parts)}"
+        return redis_key("news", ":".join(parts))
 
 
 class NewsAggregatorService:

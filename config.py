@@ -8,6 +8,8 @@ import secrets
 from pathlib import Path
 from urllib.parse import quote_plus
 import logging
+import base64
+import hashlib
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_MAX_CONNECTIONS: int = 50
     REDIS_CACHE_TTL: int = 900  # 15 minutes default cache TTL
+    REDIS_KEY_PREFIX: str = Field(
+        default="news_app",
+        description="Application namespace prefix for Redis keys to avoid collisions"
+    )
     CELERY_BROKER_URL: Optional[str] = Field(
         default=None,
         description="Celery broker URL (defaults to REDIS_URL)"
@@ -231,6 +237,52 @@ class Settings(BaseSettings):
 
     # API Security
     API_KEY_HEADER: str = "X-API-Key"
+    INTEGRATION_KEY_HEADER: str = "X-Integration-Key"
+
+    # Integration API configuration
+    ENABLE_INTEGRATION_API: bool = Field(
+        default=False,
+        description="Enable per-user integration feeds and webhook delivery APIs"
+    )
+    ENABLE_INTEGRATION_DELIVERY: bool = Field(
+        default=False,
+        description="Enable asynchronous webhook batch delivery tasks"
+    )
+
+    # Security keys for integration secret encryption (Fernet compatible key)
+    INTEGRATION_ENCRYPTION_KEY_CURRENT: Optional[str] = Field(
+        default=None,
+        description="Current encryption key for integration secrets (Fernet key)"
+    )
+    INTEGRATION_ENCRYPTION_KEY_PREVIOUS: Optional[str] = Field(
+        default=None,
+        description="Previous encryption key for seamless key rotation"
+    )
+
+    # Dev profile quotas
+    INTEGRATION_MAX_API_KEYS_PER_USER: int = 20
+    INTEGRATION_MAX_FEEDS_PER_USER: int = 20
+    INTEGRATION_MAX_BUNDLES_PER_USER: int = 10
+    INTEGRATION_MAX_FEEDS_PER_BUNDLE: int = 20
+    INTEGRATION_MAX_WEBHOOKS_PER_USER: int = 10
+    INTEGRATION_MIN_BATCH_INTERVAL_MINUTES: int = 5
+    INTEGRATION_MAX_ITEMS_PER_BATCH: int = 30
+
+    # Production strict quotas
+    INTEGRATION_PROD_MAX_API_KEYS_PER_USER: int = 5
+    INTEGRATION_PROD_MAX_FEEDS_PER_USER: int = 5
+    INTEGRATION_PROD_MAX_BUNDLES_PER_USER: int = 5
+    INTEGRATION_PROD_MAX_FEEDS_PER_BUNDLE: int = 10
+    INTEGRATION_PROD_MAX_WEBHOOKS_PER_USER: int = 3
+    INTEGRATION_PROD_MIN_BATCH_INTERVAL_MINUTES: int = 15
+    INTEGRATION_PROD_MAX_ITEMS_PER_BATCH: int = 10
+
+    INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: int = 1000
+    INTEGRATION_WEBHOOK_TEST_RATE_LIMIT_PER_HOUR: int = 30
+    INTEGRATION_FEED_CACHE_TTL: int = 900
+    INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: int = 5
+    INTEGRATION_WEBHOOK_MAX_FAILURES: int = 5
+    INTEGRATION_DELIVERY_RETENTION_DAYS: int = 30
 
     NEWSAPI_KEY: Optional[str] = Field(
         default=None,
@@ -459,6 +511,45 @@ class Settings(BaseSettings):
             self.CELERY_RESULT_BACKEND = self.CELERY_BROKER_URL
         return self
 
+    @property
+    def integration_limits(self) -> Dict[str, int]:
+        """Return environment-aware integration quotas."""
+        if self.is_production:
+            return {
+                "max_api_keys_per_user": self.INTEGRATION_PROD_MAX_API_KEYS_PER_USER,
+                "max_feeds_per_user": self.INTEGRATION_PROD_MAX_FEEDS_PER_USER,
+                "max_bundles_per_user": self.INTEGRATION_PROD_MAX_BUNDLES_PER_USER,
+                "max_feeds_per_bundle": self.INTEGRATION_PROD_MAX_FEEDS_PER_BUNDLE,
+                "max_webhooks_per_user": self.INTEGRATION_PROD_MAX_WEBHOOKS_PER_USER,
+                "min_batch_interval_minutes": self.INTEGRATION_PROD_MIN_BATCH_INTERVAL_MINUTES,
+                "max_items_per_batch": self.INTEGRATION_PROD_MAX_ITEMS_PER_BATCH,
+            }
+
+        return {
+            "max_api_keys_per_user": self.INTEGRATION_MAX_API_KEYS_PER_USER,
+            "max_feeds_per_user": self.INTEGRATION_MAX_FEEDS_PER_USER,
+            "max_bundles_per_user": self.INTEGRATION_MAX_BUNDLES_PER_USER,
+            "max_feeds_per_bundle": self.INTEGRATION_MAX_FEEDS_PER_BUNDLE,
+            "max_webhooks_per_user": self.INTEGRATION_MAX_WEBHOOKS_PER_USER,
+            "min_batch_interval_minutes": self.INTEGRATION_MIN_BATCH_INTERVAL_MINUTES,
+            "max_items_per_batch": self.INTEGRATION_MAX_ITEMS_PER_BATCH,
+        }
+
+    def get_integration_encryption_key(self) -> str:
+        """Return encryption key for integration secrets (Fernet format)."""
+        if self.INTEGRATION_ENCRYPTION_KEY_CURRENT:
+            return self.INTEGRATION_ENCRYPTION_KEY_CURRENT.strip()
+
+        # In production we require explicit key provisioning.
+        if self.is_production:
+            raise ValueError(
+                "INTEGRATION_ENCRYPTION_KEY_CURRENT must be set when ENABLE_INTEGRATION_API is enabled in production."
+            )
+
+        # Dev fallback derived from SECRET_KEY for easier local setup.
+        digest = hashlib.sha256(self.SECRET_KEY.encode("utf-8")).digest()
+        return base64.urlsafe_b64encode(digest).decode("utf-8")
+
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_PER_MINUTE: int = 100
     RATE_LIMIT_BURST: int = 20  # Burst allowance
@@ -489,6 +580,14 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [ct.strip() for ct in v.split(",") if ct.strip()]
         return v
+
+    @field_validator("REDIS_KEY_PREFIX")
+    @classmethod
+    def validate_redis_key_prefix(cls, v: str) -> str:
+        value = (v or "").strip().strip(":")
+        if not value:
+            raise ValueError("REDIS_KEY_PREFIX must not be empty")
+        return value
 
     ENABLE_HSTS: bool = True
     HSTS_MAX_AGE: int = 31536000  # 1 year
@@ -610,6 +709,11 @@ class Settings(BaseSettings):
                 issues.append("SECRET_KEY too short for production")
             if not self.NEWSAPI_KEY:
                 issues.append("NEWSAPI_KEY not set - news aggregation will be limited")
+            if self.ENABLE_INTEGRATION_API and not self.INTEGRATION_ENCRYPTION_KEY_CURRENT:
+                issues.append("INTEGRATION_ENCRYPTION_KEY_CURRENT is required for integration API in production")
+
+        if self.ENABLE_INTEGRATION_DELIVERY and not self.ENABLE_INTEGRATION_API:
+            issues.append("ENABLE_INTEGRATION_DELIVERY requires ENABLE_INTEGRATION_API=true")
         return issues
 
 

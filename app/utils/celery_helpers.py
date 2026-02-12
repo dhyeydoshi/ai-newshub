@@ -4,6 +4,7 @@ import logging
 import redis.asyncio as aioredis
 
 from app.celery_config import celery_app
+from app.core.redis_keys import redis_key
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ async def get_celery_status() -> Dict[str, Any]:
 async def get_last_fetch_time(redis_client: aioredis.Redis) -> Optional[datetime]:
     """Get timestamp of last successful fetch from Redis"""
     try:
-        timestamp = await redis_client.get('news:last_fetch_timestamp')
+        timestamp = await redis_client.get(redis_key("news", "last_fetch_timestamp"))
         if timestamp:
             if isinstance(timestamp, bytes):
                 timestamp = timestamp.decode('utf-8')

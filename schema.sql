@@ -190,6 +190,150 @@ CREATE INDEX idx_user_feedback_created_at ON user_feedback(created_at DESC);
 CREATE INDEX idx_user_feedback_type ON user_feedback(feedback_type);
 
 -- ============================================================================
+-- INTEGRATION API
+-- ============================================================================
+CREATE TABLE user_api_keys (
+    api_key_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+
+    key_hash VARCHAR(64) NOT NULL UNIQUE,
+    key_prefix VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '["feed:read"]'::JSONB,
+    rate_limit_per_hour INTEGER NOT NULL DEFAULT 1000,
+
+    last_used_at TIMESTAMPTZ,
+    request_count BIGINT NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_user_api_keys_hash ON user_api_keys(key_hash) WHERE is_active = TRUE;
+CREATE INDEX idx_user_api_keys_user ON user_api_keys(user_id) WHERE is_active = TRUE;
+CREATE INDEX idx_user_api_keys_prefix ON user_api_keys(key_prefix);
+
+CREATE TABLE user_custom_feeds (
+    feed_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    api_key_id UUID NOT NULL REFERENCES user_api_keys(api_key_id) ON DELETE CASCADE,
+
+    slug VARCHAR(140) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    filters JSONB NOT NULL DEFAULT '{}'::JSONB,
+    default_format VARCHAR(10) NOT NULL DEFAULT 'json' CHECK (default_format IN ('json', 'rss', 'atom')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_user_custom_feeds_user ON user_custom_feeds(user_id) WHERE is_active = TRUE;
+CREATE INDEX idx_user_custom_feeds_api_key ON user_custom_feeds(api_key_id);
+CREATE INDEX idx_user_custom_feeds_slug ON user_custom_feeds(slug);
+
+CREATE TABLE user_feed_bundles (
+    bundle_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    api_key_id UUID NOT NULL REFERENCES user_api_keys(api_key_id) ON DELETE CASCADE,
+
+    slug VARCHAR(140) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    default_format VARCHAR(10) NOT NULL DEFAULT 'json' CHECK (default_format IN ('json', 'rss', 'atom')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_user_feed_bundles_user ON user_feed_bundles(user_id) WHERE is_active = TRUE;
+CREATE INDEX idx_user_feed_bundles_api_key ON user_feed_bundles(api_key_id);
+CREATE INDEX idx_user_feed_bundles_slug ON user_feed_bundles(slug);
+
+CREATE TABLE bundle_feed_memberships (
+    id SERIAL PRIMARY KEY,
+    bundle_id UUID NOT NULL REFERENCES user_feed_bundles(bundle_id) ON DELETE CASCADE,
+    feed_id UUID NOT NULL REFERENCES user_custom_feeds(feed_id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT uq_bundle_feed_memberships_bundle_feed UNIQUE (bundle_id, feed_id)
+);
+
+CREATE INDEX idx_bundle_feed_memberships_bundle ON bundle_feed_memberships(bundle_id);
+CREATE INDEX idx_bundle_feed_memberships_feed ON bundle_feed_memberships(feed_id);
+
+CREATE TABLE user_webhooks (
+    webhook_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+
+    feed_id UUID REFERENCES user_custom_feeds(feed_id) ON DELETE CASCADE,
+    bundle_id UUID REFERENCES user_feed_bundles(bundle_id) ON DELETE CASCADE,
+
+    platform VARCHAR(50) NOT NULL,
+    target_encrypted TEXT NOT NULL,
+    secret_encrypted TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    batch_interval_minutes INTEGER NOT NULL DEFAULT 30,
+
+    last_triggered_at TIMESTAMPTZ,
+    last_attempted_at TIMESTAMPTZ,
+    last_success_cursor_published_at TIMESTAMPTZ,
+    last_success_cursor_article_id UUID,
+
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    max_failures INTEGER NOT NULL DEFAULT 5,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+
+    CONSTRAINT ck_user_webhooks_target_scope CHECK (
+        (feed_id IS NOT NULL AND bundle_id IS NULL)
+        OR (feed_id IS NULL AND bundle_id IS NOT NULL)
+    )
+);
+
+CREATE INDEX idx_user_webhooks_user_active ON user_webhooks(user_id) WHERE is_active = TRUE;
+CREATE INDEX idx_user_webhooks_feed ON user_webhooks(feed_id);
+CREATE INDEX idx_user_webhooks_bundle ON user_webhooks(bundle_id);
+CREATE INDEX idx_user_webhooks_due ON user_webhooks(is_active, last_triggered_at)
+WHERE is_active = TRUE AND failure_count < max_failures;
+
+CREATE TABLE webhook_delivery_jobs (
+    job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    webhook_id UUID NOT NULL REFERENCES user_webhooks(webhook_id) ON DELETE CASCADE,
+
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending' CHECK (
+        status IN ('pending', 'processing', 'delivered', 'retry_pending', 'failed', 'dead_letter', 'cancelled')
+    ),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    payload_digest VARCHAR(64) NOT NULL,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+
+    CONSTRAINT uq_webhook_delivery_jobs_idempotency UNIQUE (webhook_id, window_end, payload_digest)
+);
+
+CREATE INDEX idx_webhook_delivery_jobs_webhook ON webhook_delivery_jobs(webhook_id);
+CREATE INDEX idx_webhook_delivery_jobs_status ON webhook_delivery_jobs(status);
+CREATE INDEX idx_webhook_delivery_jobs_retry ON webhook_delivery_jobs(next_retry_at)
+WHERE status IN ('retry_pending', 'failed');
+
+CREATE TABLE webhook_delivery_items (
+    id SERIAL PRIMARY KEY,
+    job_id UUID NOT NULL REFERENCES webhook_delivery_jobs(job_id) ON DELETE CASCADE,
+    article_id UUID NOT NULL REFERENCES articles(article_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT uq_webhook_delivery_items_job_article UNIQUE (job_id, article_id)
+);
+
+CREATE INDEX idx_webhook_delivery_items_job ON webhook_delivery_items(job_id);
+CREATE INDEX idx_webhook_delivery_items_article ON webhook_delivery_items(article_id);
+
+-- ============================================================================
 -- UPDATED_AT TRIGGERS
 -- ============================================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -204,6 +348,15 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_articles_updated_at BEFORE UPDATE ON articles
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_user_custom_feeds_updated_at BEFORE UPDATE ON user_custom_feeds
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_user_feed_bundles_updated_at BEFORE UPDATE ON user_feed_bundles
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_webhook_delivery_jobs_updated_at BEFORE UPDATE ON webhook_delivery_jobs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================

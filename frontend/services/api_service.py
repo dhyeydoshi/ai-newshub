@@ -363,6 +363,265 @@ class APIService:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
+    def create_api_key(
+        self,
+        name: str,
+        scopes: Optional[List[str]] = None,
+        expires_in_days: int = 30,
+    ) -> Dict[str, Any]:
+        """Create a new integration API key."""
+        payload: Dict[str, Any] = {
+            "name": name,
+            "scopes": scopes or ["feed:read"],
+            "expires_in_days": expires_in_days,
+        }
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/api-keys",
+                json=payload,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def list_api_keys(self) -> Dict[str, Any]:
+        """List integration API keys."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/api-keys",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def revoke_api_key(self, key_id: str) -> Dict[str, Any]:
+        """Revoke an integration API key."""
+        try:
+            response = self.session.delete(
+                f"{self.base_url}/integrations/api-keys/{key_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def rotate_api_key(self, key_id: str) -> Dict[str, Any]:
+        """Rotate an integration API key."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/api-keys/{key_id}/rotate",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def create_feed(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create custom integration feed."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/feeds",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def list_feeds(self) -> Dict[str, Any]:
+        """List custom integration feeds."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/feeds",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def get_feed(self, feed_id: str) -> Dict[str, Any]:
+        """Get custom feed details."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/feeds/{feed_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def update_feed(self, feed_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update custom feed."""
+        try:
+            response = self.session.put(
+                f"{self.base_url}/integrations/feeds/{feed_id}",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def delete_feed(self, feed_id: str) -> Dict[str, Any]:
+        """Deactivate custom feed."""
+        try:
+            response = self.session.delete(
+                f"{self.base_url}/integrations/feeds/{feed_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def create_bundle(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create feed bundle."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/bundles",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def list_bundles(self) -> Dict[str, Any]:
+        """List feed bundles."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/bundles",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def get_bundle(self, bundle_id: str) -> Dict[str, Any]:
+        """Get bundle details."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/bundles/{bundle_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def update_bundle(self, bundle_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update bundle metadata."""
+        try:
+            response = self.session.patch(
+                f"{self.base_url}/integrations/bundles/{bundle_id}",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def delete_bundle(self, bundle_id: str) -> Dict[str, Any]:
+        """Deactivate bundle."""
+        try:
+            response = self.session.delete(
+                f"{self.base_url}/integrations/bundles/{bundle_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def add_feed_to_bundle(self, bundle_id: str, feed_id: str) -> Dict[str, Any]:
+        """Add feed to an existing bundle."""
+        try:
+            response = self.session.put(
+                f"{self.base_url}/integrations/bundles/{bundle_id}/feeds/{feed_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def remove_feed_from_bundle(self, bundle_id: str, feed_id: str) -> Dict[str, Any]:
+        """Remove feed from a bundle."""
+        try:
+            response = self.session.delete(
+                f"{self.base_url}/integrations/bundles/{bundle_id}/feeds/{feed_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def create_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create integration webhook."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/webhooks",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def list_webhooks(self) -> Dict[str, Any]:
+        """List integration webhooks."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/webhooks",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def update_webhook(self, webhook_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update webhook configuration."""
+        try:
+            response = self.session.patch(
+                f"{self.base_url}/integrations/webhooks/{webhook_id}",
+                json=data,
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def delete_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        """Deactivate webhook."""
+        try:
+            response = self.session.delete(
+                f"{self.base_url}/integrations/webhooks/{webhook_id}",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def test_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        """Trigger test delivery for webhook."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/integrations/webhooks/{webhook_id}/test",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def get_integration_stats(self) -> Dict[str, Any]:
+        """Get integration subsystem usage metrics."""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/integrations/stats",
+                headers=self._get_headers(),
+            )
+            return self._handle_response(response)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
 
 # Export singleton instance
 api_service = APIService()

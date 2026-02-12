@@ -53,12 +53,12 @@ async def lifespan(app: FastAPI):
             redis_client,
             default_ttl=settings.REDIS_CACHE_TTL,
             compression_threshold=1024,  # Compress values > 1KB
-            key_prefix="news_app"
+            key_prefix=settings.REDIS_KEY_PREFIX
         )
         logger.info(" Cache manager initialized with compression enabled")
         logger.info(f"   - Default TTL: {settings.REDIS_CACHE_TTL}s")
         logger.info(f"   - Compression threshold: 1KB")
-        logger.info(f"   - Key prefix: news_app")
+        logger.info(f"   - Key prefix: {settings.REDIS_KEY_PREFIX}")
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}. Rate limiting and caching will be disabled.")
         redis_client = None
@@ -246,7 +246,9 @@ async def root():
             "user": "/api/v1/user",
             "feedback": "/api/v1/feedback",
             "analytics": "/api/v1/analytics",
-            "recommendations": "/api/v1/recommendations"
+            "recommendations": "/api/v1/recommendations",
+            "integration_management": "/api/v1/integrations",
+            "integration_public": "/api/v1/integration",
         }
     }
 
