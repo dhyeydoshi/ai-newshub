@@ -1,11 +1,11 @@
 ﻿"""
-Streamlit Frontend for News Summarizer
+Streamlit Frontend for News Central
 Complete Setup and Usage Guide
 """
 
-# News Summarizer - Streamlit Frontend
+# News Central - Streamlit Frontend
 
-A modern, secure Streamlit application for the News Summarizer API with personalized recommendations powered by reinforcement learning.
+A modern, secure Streamlit application for the News Central API with personalized recommendations powered by reinforcement learning.
 
 ## Features
 

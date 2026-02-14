@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "News Summarizer API"
+    APP_NAME: str = "News Central API"
     APP_VERSION: str = "1.0.0"
     ENVIRONMENT: str = Field(default="development", pattern="^(development|staging|production)$")
     DEBUG: bool = Field(
@@ -665,7 +665,7 @@ class Settings(BaseSettings):
         description="SMTP password for sending emails"
     )
     SMTP_FROM_EMAIL: str = "noreply@newssummarizer.com"
-    SMTP_FROM_NAME: str = "News Summarizer"
+    SMTP_FROM_NAME: str = "News Central"
 
 
     @property

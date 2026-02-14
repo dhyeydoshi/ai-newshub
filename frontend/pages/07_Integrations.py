@@ -4,7 +4,7 @@ import streamlit as st
 
 from services.api_service import api_service
 from frontend_config import config
-from utils.auth import init_auth_state, require_auth
+from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     apply_custom_css,
     init_page_config,
@@ -15,7 +15,7 @@ from utils.ui_helpers import (
 )
 
 
-init_page_config("Integrations | News Summarizer", "")
+init_page_config("Integrations | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -117,9 +117,9 @@ def _load_integrations_data() -> Dict[str, Any]:
 
 
 def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
-    st.markdown("### API Keys")
+    st.markdown("### :material/key: API Keys")
     st.caption("Create and manage per-user integration keys.")
-    with st.expander("Supported integration scopes", expanded=True):
+    with st.expander(":material/shield: Supported integration scopes", expanded=True):
         st.table(
             [
                 {"Scope": row["scope"], "Description": row["description"]}
@@ -166,7 +166,7 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
         st.code(plain_key)
 
     if not api_keys:
-        st.info("No API keys found.")
+        st.info(":material/info: No API keys found. Create one above to get started.")
         return
 
     vault = _get_api_key_vault()
@@ -209,7 +209,7 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
                 st.badge("Inactive", color="red")
         with col4:
             if is_active:
-                if st.button("Rotate", key=f"rotate_key_{uid}"):
+                if st.button(":material/autorenew: Rotate", key=f"rotate_key_{uid}"):
                     result = api_service.rotate_api_key(key_id)
                     if result.get("success"):
                         created = _safe_dict(result.get("data"))
@@ -219,7 +219,7 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
                         st.rerun()
                     else:
                         show_error(result.get("error", "Failed to rotate API key"))
-                if st.button("Revoke", key=f"revoke_key_{uid}"):
+                if st.button(":material/block: Revoke", key=f"revoke_key_{uid}"):
                     result = api_service.revoke_api_key(key_id)
                     if result.get("success"):
                         _forget_plain_api_key(key_id)
@@ -228,7 +228,7 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
                     else:
                         show_error(result.get("error", "Failed to revoke API key"))
             else:
-                if st.button("Delete", key=f"delete_key_{uid}", type="primary"):
+                if st.button(":material/delete: Delete", key=f"delete_key_{uid}", type="primary"):
                     result = api_service.delete_api_key(key_id)
                     if result.get("success"):
                         _forget_plain_api_key(key_id)
@@ -240,15 +240,19 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
 
 
 def _show_feeds(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]]) -> None:
-    st.markdown("### Custom Feeds")
+    st.markdown("### :material/rss_feed: Custom Feeds")
     st.caption("Create filtered feeds with JSON/RSS/Atom links.")
 
     active_keys = [k for k in api_keys if k.get("is_active")]
     if not active_keys:
-        st.info("Create an active API key first.")
+        st.info(":material/key: Create an active API key first.")
         return
 
-    key_options = {f"{k.get('name')} ({k.get('prefix')})": str(k.get("key_id")) for k in active_keys}
+    key_options = {
+        f"{k.get('name')} ({k.get('prefix') or k.get('key_prefix') or 'no-prefix'})": 
+        str(k.get("key_id") or k.get("api_key_id") or "")
+        for k in active_keys
+    }
 
     with st.form("create_feed_form", clear_on_submit=True):
         name = st.text_input("Feed name", value="My custom feed")
@@ -321,7 +325,7 @@ def _show_feeds(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]]) -> 
                 show_error(result.get("error", "Failed to create feed"))
 
     if not feeds:
-        st.info("No feeds created yet.")
+        st.info(":material/inbox: No feeds created yet. Use the form above to create one.")
         return
 
     for feed in feeds:
@@ -341,7 +345,7 @@ def _show_feeds(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]]) -> 
         st.code(rss_url)
         st.code(atom_url)
 
-        if st.button("Delete Feed", key=f"delete_feed_{feed_id}"):
+        if st.button(":material/delete: Delete Feed", key=f"delete_feed_{feed_id}"):
             result = api_service.delete_feed(feed_id)
             if result.get("success"):
                 show_toast("Feed deactivated")
@@ -352,18 +356,22 @@ def _show_feeds(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]]) -> 
 
 
 def _show_bundles(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]]) -> None:
-    st.markdown("### Bundles")
+    st.markdown("### :material/folder_special: Bundles")
     st.caption("Group multiple feeds into a single endpoint.")
 
     active_keys = [k for k in api_keys if k.get("is_active")]
     if not active_keys:
-        st.info("Create an active API key first.")
+        st.info(":material/key: Create an active API key first.")
         return
     if not feeds:
-        st.info("Create at least one feed before creating bundles.")
+        st.info(":material/rss_feed: Create at least one feed before creating bundles.")
         return
 
-    key_options = {f"{k.get('name')} ({k.get('prefix')})": str(k.get("key_id")) for k in active_keys}
+    key_options = {
+        f"{k.get('name')} ({k.get('prefix') or k.get('key_prefix') or 'no-prefix'})": 
+        str(k.get("key_id") or k.get("api_key_id") or "")
+        for k in active_keys
+    }
     feed_options = {f.get("name", "Unnamed"): str(f.get("feed_id")) for f in feeds if f.get("feed_id")}
 
     with st.form("create_bundle_form", clear_on_submit=True):
@@ -390,7 +398,7 @@ def _show_bundles(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]], b
                 show_error(result.get("error", "Failed to create bundle"))
 
     if not bundles:
-        st.info("No bundles created yet.")
+        st.info(":material/inbox: No bundles created yet. Use the form above to create one.")
         return
 
     id_to_feed_name = {str(f.get("feed_id")): f.get("name", "Unnamed feed") for f in feeds}
@@ -408,7 +416,7 @@ def _show_bundles(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]], b
         st.code(bundle.get("rss_url", ""))
         st.code(bundle.get("atom_url", ""))
 
-        if st.button("Delete Bundle", key=f"delete_bundle_{bundle_id}"):
+        if st.button(":material/delete: Delete Bundle", key=f"delete_bundle_{bundle_id}"):
             result = api_service.delete_bundle(bundle_id)
             if result.get("success"):
                 show_toast("Bundle deactivated")
@@ -419,11 +427,11 @@ def _show_bundles(api_keys: List[Dict[str, Any]], feeds: List[Dict[str, Any]], b
 
 
 def _show_webhooks(feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]], webhooks: List[Dict[str, Any]]) -> None:
-    st.markdown("### Webhooks")
+    st.markdown("### :material/webhook: Webhooks")
     st.caption("Push feed updates to Slack, Discord, Telegram, Email, or generic webhook endpoints.")
 
     if not feeds and not bundles:
-        st.info("Create at least one feed or bundle before creating webhooks.")
+        st.info(":material/rss_feed: Create at least one feed or bundle before creating webhooks.")
         return
 
     feed_options = {f.get("name", "Unnamed"): str(f.get("feed_id")) for f in feeds if f.get("feed_id")}
@@ -472,7 +480,7 @@ def _show_webhooks(feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]], w
                 show_error(result.get("error", "Failed to create webhook"))
 
     if not webhooks:
-        st.info("No webhooks created yet.")
+        st.info(":material/inbox: No webhooks created yet. Use the form above to create one.")
         return
 
     for webhook in webhooks:
@@ -485,7 +493,7 @@ def _show_webhooks(feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]], w
         )
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Test", key=f"test_webhook_{webhook_id}"):
+            if st.button(":material/send: Test", key=f"test_webhook_{webhook_id}"):
                 result = api_service.test_webhook(webhook_id)
                 if result.get("success"):
                     response = _safe_dict(result.get("data"))
@@ -497,7 +505,7 @@ def _show_webhooks(feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]], w
                 else:
                     show_error(result.get("error", "Failed to test webhook"))
         with col2:
-            if st.button("Delete", key=f"delete_webhook_{webhook_id}"):
+            if st.button(":material/delete: Delete", key=f"delete_webhook_{webhook_id}"):
                 result = api_service.delete_webhook(webhook_id)
                 if result.get("success"):
                     show_toast("Webhook deactivated")
@@ -508,14 +516,14 @@ def _show_webhooks(feeds: List[Dict[str, Any]], bundles: List[Dict[str, Any]], w
 
 
 def _show_usage(stats: Dict[str, Any]) -> None:
-    st.markdown("### Usage")
+    st.markdown("### :material/bar_chart: Usage")
     st.caption("Current integration usage and limits.")
 
     if not stats:
-        st.info("Usage data unavailable.")
+        st.info(":material/info: Usage data unavailable.")
         return
 
-    st.markdown("#### Active Resources")
+    st.markdown("#### :material/check_circle: Active Resources")
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Active API Keys", stats.get("active_api_keys", 0))
@@ -525,7 +533,7 @@ def _show_usage(stats: Dict[str, Any]) -> None:
         st.metric("Active Webhooks", stats.get("active_webhooks", 0))
 
     jobs = _safe_dict(stats.get("delivery_jobs"))
-    st.markdown("#### Delivery Jobs")
+    st.markdown("#### :material/local_shipping: Delivery Jobs")
     col3, col4, col5 = st.columns(3)
     with col3:
         st.metric("Delivered", jobs.get("delivered", 0))
@@ -536,7 +544,7 @@ def _show_usage(stats: Dict[str, Any]) -> None:
 
     limits = _safe_dict(stats.get("limits"))
     if limits:
-        st.markdown("#### Limits")
+        st.markdown("#### :material/speed: Limits")
         label_map = {
             "max_api_keys_per_user": "Max API Keys per User",
             "max_feeds_per_user": "Max Feeds per User",
@@ -561,30 +569,478 @@ def _show_usage(stats: Dict[str, Any]) -> None:
             st.table(rows)
 
 
+def _show_documentation() -> None:
+    st.markdown("### :material/menu_book: Integration Documentation")
+    st.caption("Complete reference for API keys, feeds, bundles, and webhooks.")
+
+    base_url = config.API_ENDPOINT
+
+    # ── Quick Start ──────────────────────────────────────────────────
+    with st.expander(":material/rocket_launch: Quick Start Guide", expanded=True):
+        st.markdown(f"""
+**Getting started in 4 steps:**
+
+1. **Create an API Key** — Go to the *API Keys* tab and create a key with the `feed:read` scope.
+   Copy the key immediately; it is shown only once.
+
+2. **Create a Custom Feed** — Go to *Custom Feeds*, select your API key, pick topics/filters,
+   and choose an output format (JSON, RSS, or Atom).
+
+3. **Consume the Feed** — Use the generated feed URL with your API key to pull articles:
+   ```
+   curl -H "Authorization: Bearer YOUR_API_KEY" \\
+        "{base_url.replace('/api/v1', '')}/api/v1/integration/feeds/your-feed-slug"
+   ```
+
+4. **(Optional) Set Up Webhooks** — Attach a webhook to your feed or bundle to receive
+   automatic push notifications on Slack, Discord, Telegram, Email, or a custom URL.
+""")
+
+    # ── Authentication ───────────────────────────────────────────────
+    with st.expander(":material/lock: Authentication"):
+        st.markdown("""
+This integration system uses **two separate authentication methods**:
+
+| Context | Auth Method | Used For |
+|---------|-------------|----------|
+| **Management API** | JWT Bearer Token (login session) | Creating/managing keys, feeds, bundles, webhooks |
+| **Public Feed API** | Integration API Key | Consuming feed/bundle data programmatically |
+
+**Three ways to pass your Integration API Key** (checked in this order):
+
+1. **Authorization header** (recommended):
+   ```
+   Authorization: Bearer nk_abc123...
+   ```
+
+2. **Custom header**:
+   ```
+   X-Integration-Key: nk_abc123...
+   ```
+
+3. **Query parameter** (use only when headers aren't possible):
+   ```
+   ?token=nk_abc123...
+   ```
+""")
+
+    # ── API Keys ─────────────────────────────────────────────────────
+    with st.expander(":material/key: API Keys Reference"):
+        st.markdown(f"""
+API keys authenticate requests to the **public feed/bundle endpoints**.
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `{base_url}/integrations/api-keys` | Create a new API key |
+| `GET` | `{base_url}/integrations/api-keys` | List all your API keys |
+| `POST` | `{base_url}/integrations/api-keys/{{key_id}}/rotate` | Rotate a key (revoke old, issue new) |
+| `DELETE` | `{base_url}/integrations/api-keys/{{key_id}}` | Revoke a key (soft delete) |
+| `DELETE` | `{base_url}/integrations/api-keys/{{key_id}}/permanent` | Permanently delete a revoked key |
+
+**Create Key — Request Body:**
+```json
+{{
+  "name": "my-production-key",
+  "scopes": ["feed:read"],
+  "expires_in_days": 90
+}}
+```
+
+**Create Key — Response:**
+```json
+{{
+  "api_key": "nk_a1b2c3d4e5f6...",
+  "key_id": "550e8400-e29b-41d4-a716-446655440000",
+  "prefix": "nk_a1b2c3",
+  "name": "my-production-key",
+  "scopes": ["feed:read"],
+  "expires_at": "2026-05-14T00:00:00Z",
+  "message": "API key created. Save it now because it will not be shown again."
+}}
+```
+
+**Available Scopes:**
+
+| Scope | Description |
+|-------|-------------|
+| `feed:read` | Read access to feed and bundle endpoints |
+| `*` | Wildcard — full access to all scopes |
+
+**Key Properties:**
+- Keys are **hashed** server-side (SHA-256) — the plain key is only returned at creation/rotation time
+- Each key has an independent **hourly rate limit** (default: 1,000 requests/hour)
+- Usage counters track total requests per key
+""")
+
+    # ── Feeds ────────────────────────────────────────────────────────
+    with st.expander(":material/rss_feed: Custom Feeds Reference"):
+        st.markdown(f"""
+Custom feeds let you define filtered article streams accessible via a permanent URL.
+
+**Management Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `{base_url}/integrations/feeds` | Create a feed |
+| `GET` | `{base_url}/integrations/feeds` | List your feeds |
+| `GET` | `{base_url}/integrations/feeds/{{feed_id}}` | Get feed details |
+| `PUT` | `{base_url}/integrations/feeds/{{feed_id}}` | Update a feed |
+| `DELETE` | `{base_url}/integrations/feeds/{{feed_id}}` | Deactivate a feed |
+
+**Public Consumption Endpoints** (use API key):
+
+| Path | Format |
+|------|--------|
+| `/api/v1/integration/feeds/{{slug}}` | Feed's default format |
+| `/api/v1/integration/feeds/{{slug}}/rss` | RSS XML |
+| `/api/v1/integration/feeds/{{slug}}/atom` | Atom XML |
+
+**Query Parameters for public endpoints:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 20 | Items per page (1–100) |
+| `since` | datetime | — | Only articles published after this time |
+| `sort` | string | `date` | `date` or `relevance` |
+
+**Create Feed — Example Request:**
+```json
+{{
+  "name": "AI & Tech News",
+  "description": "Latest articles on AI and technology",
+  "api_key_id": "550e8400-e29b-41d4-a716-446655440000",
+  "format": "json",
+  "filters": {{
+    "topics": ["technology", "science"],
+    "categories": ["technology"],
+    "keywords": ["artificial intelligence", "machine learning"],
+    "exclude_keywords": ["crypto"],
+    "language": "en",
+    "exclude_read": true,
+    "min_score": 0.1,
+    "max_age_days": 7,
+    "limit": 20,
+    "sort_mode": "date"
+  }}
+}}
+```
+
+**Consume Feed — Example:**
+```bash
+# JSON (default)
+curl -H "Authorization: Bearer nk_abc123..." \\
+     "{base_url.replace('/api/v1', '')}/api/v1/integration/feeds/ai-tech-news"
+
+# RSS
+curl -H "Authorization: Bearer nk_abc123..." \\
+     "{base_url.replace('/api/v1', '')}/api/v1/integration/feeds/ai-tech-news/rss"
+
+# Atom
+curl -H "Authorization: Bearer nk_abc123..." \\
+     "{base_url.replace('/api/v1', '')}/api/v1/integration/feeds/ai-tech-news/atom"
+```
+
+**JSON Response Example:**
+```json
+{{
+  "feed_id": "...",
+  "name": "AI & Tech News",
+  "generated_at": "2026-02-14T10:30:00Z",
+  "total": 15,
+  "items": [
+    {{
+      "article_id": "...",
+      "title": "OpenAI Announces New Model",
+      "url": "https://example.com/article",
+      "source_name": "TechCrunch",
+      "author": "Jane Doe",
+      "excerpt": "OpenAI has released...",
+      "image_url": "https://example.com/image.jpg",
+      "topics": ["technology", "artificial intelligence"],
+      "category": "technology",
+      "published_date": "2026-02-14T08:00:00Z",
+      "relevance_score": 0.92
+    }}
+  ],
+  "next_cursor": "..."
+}}
+```
+""")
+
+    # ── Feed Filters Reference ───────────────────────────────────────
+    with st.expander(":material/filter_alt: Feed Filters — Complete Reference"):
+        st.table([
+            {"Field": "topics", "Type": "list[str]", "Default": "[]", "Description": "Include only articles matching these topics"},
+            {"Field": "exclude_topics", "Type": "list[str]", "Default": "[]", "Description": "Exclude articles with these topics"},
+            {"Field": "categories", "Type": "list[str]", "Default": "[]", "Description": "Include only articles in these categories"},
+            {"Field": "keywords", "Type": "list[str]", "Default": "[]", "Description": "Include articles containing these keywords"},
+            {"Field": "exclude_keywords", "Type": "list[str]", "Default": "[]", "Description": "Exclude articles containing these keywords"},
+            {"Field": "sources", "Type": "list[str]", "Default": "[]", "Description": "Include only articles from these sources"},
+            {"Field": "exclude_sources", "Type": "list[str]", "Default": "[]", "Description": "Exclude articles from these sources"},
+            {"Field": "language", "Type": "str", "Default": "en", "Description": "ISO language code (e.g., en, fr, de)"},
+            {"Field": "exclude_read", "Type": "bool", "Default": "true", "Description": "Exclude articles you've already read"},
+            {"Field": "min_score", "Type": "float", "Default": "0.0", "Description": "Minimum relevance score (0.0–1.0)"},
+            {"Field": "max_age_days", "Type": "int", "Default": "7", "Description": "Maximum article age in days (1–30)"},
+            {"Field": "limit", "Type": "int", "Default": "20", "Description": "Maximum items returned (1–100)"},
+            {"Field": "sort_mode", "Type": "str", "Default": "date", "Description": "'date' (newest first) or 'relevance' (highest score first)"},
+        ])
+        st.info("All list fields are deduplicated, lowercased, HTML-escaped, and capped at 50 items max.")
+
+    # ── Bundles ──────────────────────────────────────────────────────
+    with st.expander(":material/folder_special: Bundles Reference"):
+        st.markdown(f"""
+Bundles group multiple custom feeds into a **single endpoint**, merging and deduplicating their results.
+
+**Management Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `{base_url}/integrations/bundles` | Create a bundle |
+| `GET` | `{base_url}/integrations/bundles` | List bundles |
+| `GET` | `{base_url}/integrations/bundles/{{bundle_id}}` | Get bundle details |
+| `PATCH` | `{base_url}/integrations/bundles/{{bundle_id}}` | Update bundle metadata |
+| `PUT` | `{base_url}/integrations/bundles/{{bundle_id}}/feeds/{{feed_id}}` | Add a feed to the bundle |
+| `DELETE` | `{base_url}/integrations/bundles/{{bundle_id}}/feeds/{{feed_id}}` | Remove a feed from the bundle |
+| `DELETE` | `{base_url}/integrations/bundles/{{bundle_id}}` | Deactivate a bundle |
+
+**Public Consumption:**
+
+| Path | Format |
+|------|--------|
+| `/api/v1/integration/bundles/{{slug}}` | Bundle's default format |
+| `/api/v1/integration/bundles/{{slug}}/rss` | RSS XML |
+| `/api/v1/integration/bundles/{{slug}}/atom` | Atom XML |
+
+**Create Bundle — Example:**
+```json
+{{
+  "name": "All Tech Sources",
+  "description": "Combined feed from all technology-related feeds",
+  "api_key_id": "550e8400-e29b-41d4-a716-446655440000",
+  "format": "rss",
+  "feed_ids": [
+    "feed-uuid-1",
+    "feed-uuid-2"
+  ]
+}}
+```
+
+**Consume Bundle — Example:**
+```bash
+curl -H "Authorization: Bearer nk_abc123..." \\
+     "{base_url.replace('/api/v1', '')}/api/v1/integration/bundles/all-tech-sources/rss"
+```
+
+**Behavior Notes:**
+- When feeds overlap (same article in multiple member feeds), the bundle deduplicates by article ID
+- The **highest relevance score** is kept when duplicates exist across member feeds
+- A bundle can contain up to **10–20 feeds** depending on server configuration
+""")
+
+    # ── Webhooks ─────────────────────────────────────────────────────
+    with st.expander(":material/webhook: Webhooks Reference"):
+        st.markdown(f"""
+Webhooks push article updates from your feeds or bundles to external platforms automatically.
+
+**Management Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `{base_url}/integrations/webhooks` | Create a webhook |
+| `GET` | `{base_url}/integrations/webhooks` | List webhooks |
+| `PATCH` | `{base_url}/integrations/webhooks/{{webhook_id}}` | Update a webhook |
+| `DELETE` | `{base_url}/integrations/webhooks/{{webhook_id}}` | Deactivate a webhook |
+| `POST` | `{base_url}/integrations/webhooks/{{webhook_id}}/test` | Send a test delivery |
+
+**Supported Platforms:**
+
+| Platform | Target Format | Secret | Notes |
+|----------|---------------|--------|-------|
+| `slack` | Slack Incoming Webhook URL | Optional | HTTPS URL required |
+| `discord` | Discord Webhook URL | Optional | HTTPS URL required |
+| `telegram` | Chat ID (e.g., `-1001234567890`) | **Required** — Bot token | Format: `123456:ABC-DEF1234ghIkl-zyx` |
+| `email` | Email address | Optional | Valid email format required |
+| `generic` | Any HTTPS webhook URL | Optional | Signed with `X-Webhook-Signature` if secret provided |
+
+**Create Webhook — Examples:**
+
+*Slack:*
+```json
+{{
+  "platform": "slack",
+  "target": "https://hooks.slack.com/services/T00/B00/xxxx",
+  "feed_id": "your-feed-uuid",
+  "batch_interval_minutes": 60,
+  "max_failures": 5
+}}
+```
+
+*Discord:*
+```json
+{{
+  "platform": "discord",
+  "target": "https://discord.com/api/webhooks/123456/abcdef",
+  "bundle_id": "your-bundle-uuid",
+  "batch_interval_minutes": 30
+}}
+```
+
+*Telegram:*
+```json
+{{
+  "platform": "telegram",
+  "target": "-1001234567890",
+  "secret": "123456:ABC-DEF1234ghIkl-zyx",
+  "feed_id": "your-feed-uuid",
+  "batch_interval_minutes": 15
+}}
+```
+
+*Email:*
+```json
+{{
+  "platform": "email",
+  "target": "user@example.com",
+  "feed_id": "your-feed-uuid",
+  "batch_interval_minutes": 120
+}}
+```
+
+*Generic Webhook:*
+```json
+{{
+  "platform": "generic",
+  "target": "https://api.example.com/webhook",
+  "secret": "my-signing-secret",
+  "bundle_id": "your-bundle-uuid",
+  "batch_interval_minutes": 30
+}}
+```
+""")
+
+    # ── Delivery Lifecycle ───────────────────────────────────────────
+    with st.expander(":material/local_shipping: Webhook Delivery Lifecycle"):
+        st.markdown("""
+**How delivery works:**
+
+1. **Batch Planning** — A background worker periodically checks each active webhook for new articles
+   since its last successful delivery.
+
+2. **Job Creation** — When new articles are found, a delivery job is created with status `pending`.
+
+3. **Delivery Attempt** — The worker sends the batch payload to the target platform.
+
+4. **On Success** — Job is marked `delivered`, the webhook's cursor advances, and the failure counter resets.
+
+5. **On Failure** — Job is marked `retry_pending`, and retried with increasing backoff delays.
+
+**Retry Backoff Schedule:**
+
+| Attempt | Delay |
+|---------|-------|
+| 1st retry | 1 minute |
+| 2nd retry | 5 minutes |
+| 3rd retry | 15 minutes |
+| 4th retry | 60 minutes |
+| 5th retry | 240 minutes |
+
+**Dead Letter:**
+After reaching the `max_failures` threshold (default: 5), the webhook is **automatically deactivated**
+and the job moves to `dead_letter` status. Re-enable the webhook manually after fixing the target issue.
+
+**Job Statuses:**
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Waiting for delivery attempt |
+| `processing` | Currently being delivered |
+| `delivered` | Successfully sent |
+| `retry_pending` | Failed, scheduled for retry |
+| `dead_letter` | Exceeded max failures — webhook deactivated |
+| `cancelled` | Manually cancelled |
+""")
+
+    # ── Security ────────────────────────────────────────────────────
+    with st.expander(":material/shield: Security & Rate Limits"):
+        st.markdown("""
+**Data Security:**
+- API keys are stored as **SHA-256 hashes** — plain keys are never persisted
+- Webhook targets and secrets are **encrypted at rest** using Fernet symmetric encryption
+- Encryption key rotation is supported seamlessly (current + previous key)
+- Webhook URLs are validated to **block private/local network destinations**
+- Webhook payloads are signed with `X-Webhook-Signature` when a secret is configured
+
+**Rate Limits:**
+
+| Resource | Limit |
+|----------|-------|
+| API key requests | 1,000 per hour per key |
+| Webhook test endpoint | 30 per hour per user |
+| Feed response caching | 15 minutes TTL |
+
+**Per-User Quotas** (varies by environment):
+
+| Resource | Development | Production |
+|----------|-------------|------------|
+| API Keys | 20 | 5 |
+| Custom Feeds | 20 | 5 |
+| Bundles | 10 | 5 |
+| Feeds per Bundle | 20 | 10 |
+| Webhooks | 10 | 3 |
+| Min Batch Interval | 5 min | 15 min |
+| Max Items per Batch | 30 | 10 |
+
+**Delivery Settings:**
+
+| Setting | Value |
+|---------|-------|
+| Delivery timeout | 5 seconds per attempt |
+| Delivery history retention | 30 days |
+| Dead letter threshold | Configurable per webhook (1–20, default 5) |
+""")
+
+
 @require_auth
 def main() -> None:
-    st.title("Integrations")
+    # Sidebar
+    with st.sidebar:
+        username = st.session_state.get("username", "User")
+        st.markdown(f"### :material/person: {username}")
+        st.divider()
+        if st.button(":material/logout: Logout", use_container_width=True):
+            logout()
+    
+    st.title(":material/hub: Integrations")
     st.caption("Manage API keys, custom feeds, bundles, and webhooks.")
 
     if not config.ENABLE_INTEGRATIONS:
-        st.info("Integrations are disabled in configuration. Set ENABLE_INTEGRATION_API=true to enable this feature.")
+        st.info(":material/block: Integrations are disabled in configuration. Set `ENABLE_INTEGRATION_API=true` to enable this feature.")
         return
 
-    if st.button("Refresh", use_container_width=False):
+    if st.button(":material/refresh: Refresh", use_container_width=False):
         st.rerun()
 
     with show_loading("Loading integration data..."):
         data = _load_integrations_data()
 
     if data.get("disabled"):
-        st.info("Integrations are disabled on the backend. Enable ENABLE_INTEGRATION_API to use this page.")
+        st.info(":material/block: Integrations are disabled on the backend. Enable `ENABLE_INTEGRATION_API` to use this page.")
         return
 
     errors = data.get("errors", [])
     for error in errors:
         show_error(f"Failed to load {error}")
 
-    tabs = st.tabs(["API Keys", "Custom Feeds", "Bundles", "Webhooks", "Usage"])
+    tabs = st.tabs([
+        ":material/key: API Keys",
+        ":material/rss_feed: Custom Feeds",
+        ":material/folder_special: Bundles",
+        ":material/webhook: Webhooks",
+        ":material/bar_chart: Usage",
+        ":material/menu_book: Documentation",
+    ])
 
     with tabs[0]:
         _show_api_keys(data.get("api_keys", []))
@@ -596,6 +1052,8 @@ def main() -> None:
         _show_webhooks(data.get("feeds", []), data.get("bundles", []), data.get("webhooks", []))
     with tabs[4]:
         _show_usage(data.get("stats", {}))
+    with tabs[5]:
+        _show_documentation()
 
 
 if __name__ == "__main__":

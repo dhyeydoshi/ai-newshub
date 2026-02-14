@@ -14,7 +14,7 @@ from utils.ui_helpers import (
 )
 
 # Initialize
-init_page_config("Profile | News Summarizer", "")
+init_page_config("Profile | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -22,7 +22,7 @@ init_auth_state()
 @require_auth
 def main() -> None:
     """User profile page"""
-    st.title("My Profile")
+    st.title(":material/person: My Profile")
     st.caption(f"Logged in as **{st.session_state.get('username', 'User')}**")
 
     st.divider()
@@ -37,22 +37,23 @@ def main() -> None:
     profile = result["data"]
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "Profile Info",
-        "Reading History",
-        "Analytics",
-        "Account",
+        ":material/badge: Profile Info",
+        ":material/history: Reading History",
+        ":material/insights: Analytics",
+        ":material/shield: Account",
     ])
 
     with tab1:
-        st.markdown("### Personal Information")
+        st.markdown("### :material/badge: Personal Information")
 
         col1, col2 = st.columns([1, 2])
 
         with col1:
+            initial = (profile.get("full_name") or profile.get("username") or "U")[0].upper()
             st.markdown(
-                """
-            <div style='text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; width: 150px; height: 150px; margin: auto;'>
-                <h1 style='color: white; margin-top: 40px; font-size: 4rem;'></h1>
+                f"""
+            <div style='text-align: center; padding: 0; background: linear-gradient(135deg, #1f7a6a 0%, #145c50 100%); border-radius: 50%; width: 130px; height: 130px; margin: auto; display: flex; align-items: center; justify-content: center;'>
+                <span style='color: white; font-size: 3.5rem; font-family: Space Grotesk, sans-serif; font-weight: 700;'>{initial}</span>
             </div>
             """,
                 unsafe_allow_html=True,
@@ -117,7 +118,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Account Statistics")
+        st.markdown("### :material/bar_chart: Account Statistics")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -144,7 +145,7 @@ def main() -> None:
                 st.metric("Member Since", format_date(member_since))
 
     with tab2:
-        st.markdown("### Your Reading History")
+        st.markdown("### :material/history: Your Reading History")
         st.caption("Articles you've read recently")
 
         with show_loading("Loading history..."):
@@ -200,7 +201,7 @@ def main() -> None:
             show_error("Failed to load reading history")
 
     with tab3:
-        st.markdown("### Your Reading Analytics")
+        st.markdown("### :material/insights: Your Reading Analytics")
         st.caption("Insights into your reading habits")
 
         col1, col2 = st.columns(2)
@@ -275,7 +276,7 @@ def main() -> None:
             )
 
     with tab4:
-        st.markdown("### Account Security")
+        st.markdown("### :material/shield: Account Security")
 
         with st.expander("Change Password"):
             with st.form("password_form"):
@@ -297,7 +298,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Two-Factor Authentication")
+        st.markdown("### :material/key: Two-Factor Authentication")
         st.caption("Add an extra layer of security to your account")
 
         if st.button("Enable 2FA", type="primary"):
@@ -305,25 +306,20 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Active Sessions")
+        st.markdown("### :material/devices: Active Sessions")
         st.caption("Manage your active login sessions")
 
-        sessions = [
-            {"device": "Chrome on Windows", "location": "New York, US", "last_active": "Just now"},
-            {"device": "Safari on iPhone", "location": "New York, US", "last_active": "2 hours ago"},
-        ]
-
-        for idx, session in enumerate(sessions):
+        with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.write(f"**{session['device']}**")
-                st.caption(f"{session['location']} | {session['last_active']}")
+                st.write(f"**Current session**")
+                st.caption(f":material/person: {st.session_state.get('username', 'User')}  \u2022  Active now")
             with col2:
-                if st.button("Revoke", key=f"revoke_{idx}"):
-                    show_success("Session revoked")
-            st.divider()
+                st.badge("Current", color="green")
 
-        st.markdown("### Sign Out")
+        st.caption(":material/info: Only the current session is shown. Use logout to end it.")
+
+        st.markdown("### :material/logout: Sign Out")
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -335,7 +331,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Danger Zone")
+        st.markdown("### :material/warning: Danger Zone")
 
         with st.expander("Delete Account", expanded=False):
             st.warning("Warning: This action is permanent and cannot be undone!")

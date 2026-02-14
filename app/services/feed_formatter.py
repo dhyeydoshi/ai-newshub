@@ -62,7 +62,7 @@ def format_rss_feed(
     ET.SubElement(channel, "link").text = _safe_text(link, 2048)
     ET.SubElement(channel, "description").text = _safe_text(description, 2000)
     ET.SubElement(channel, "lastBuildDate").text = format_datetime(datetime.now(timezone.utc))
-    ET.SubElement(channel, "generator").text = "News Summarizer Integration API"
+    ET.SubElement(channel, "generator").text = "News Central Integration API"
 
     for entry in article_entries:
         article: Article = entry["article"]

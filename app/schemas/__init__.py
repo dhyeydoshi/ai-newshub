@@ -19,8 +19,6 @@ from app.schemas.article import (
     ArticleResponse,
     ArticleListResponse,
     ArticleDetailResponse,
-    SummaryRequest,
-    SummaryResponse,
     NewsQuery,
     TrendingArticlesResponse,
     SearchResultsResponse,
@@ -41,7 +39,6 @@ from app.schemas.user import (
 )
 from app.schemas.feedback import (
     ArticleFeedbackRequest,
-    SummaryFeedbackRequest,
     FeedbackResponse,
     ReadingInteractionRequest,
     InteractionResponse,
@@ -91,8 +88,6 @@ __all__ = [
     "ArticleResponse",
     "ArticleListResponse",
     "ArticleDetailResponse",
-    "SummaryRequest",
-    "SummaryResponse",
     "NewsQuery",
     "TrendingArticlesResponse",
     "SearchResultsResponse",
@@ -111,7 +106,6 @@ __all__ = [
     "DataExportResponse",
     # Feedback schemas
     "ArticleFeedbackRequest",
-    "SummaryFeedbackRequest",
     "FeedbackResponse",
     "ReadingInteractionRequest",
     "InteractionResponse",

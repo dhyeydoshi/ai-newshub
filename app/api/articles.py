@@ -451,65 +451,11 @@ async def get_article_detail(
         'avg_time_spent': getattr(article, 'avg_time_spent', 0.0),
         'is_featured': getattr(article, 'is_featured', False),
         'created_at': article.created_at,
+        'url': str(article.url) if article.url else None,
         'related_articles': related_articles
     }
 
     return ArticleDetailResponse(**response_data)
-
-
-@router.get("/summary/{article_id}")
-async def get_article_summary(
-    article_id: str,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    from uuid import UUID
-
-    try:
-        uuid_article_id = UUID(article_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid article ID format"
-        )
-
-    # Get article
-    result = await db.execute(
-        select(Article).where(and_(
-            Article.article_id == uuid_article_id,
-            Article.is_active == True
-        ))
-    )
-    article = result.scalar_one_or_none()
-
-    if not article:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Article not found"
-        )
-
-    # Return cached summary if available
-    if article.excerpt:
-        excerpt_text = ContentSanitizer.sanitize_text(article.excerpt)
-        return {
-            "article_id": article.article_id,
-            "excerpt": excerpt_text,
-            "word_count": len(excerpt_text.split()),
-            "cached": True
-        }
-
-    # Simple extraction of first few sentences
-    clean_content = ContentSanitizer.sanitize_text(article.content)
-    sentences = clean_content.split('.')[:3]
-    simple_summary = '. '.join(s.strip() for s in sentences if s.strip()) + '.'
-
-    return {
-        "article_id": article.article_id,
-        "excerpt": simple_summary,
-        "word_count": len(simple_summary.split()),
-        "cached": False,
-        "model_used": "simple_extraction"
-    }
 
 
 @router.get("/trending", response_model=TrendingArticlesResponse)

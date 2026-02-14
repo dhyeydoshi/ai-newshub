@@ -175,11 +175,32 @@ class APIService:
     def get_article(self, article_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/news/article/{article_id}")
 
-    def search_news(self, query: str, page: int = 1, limit: int = 10) -> Dict[str, Any]:
-        return self._request("GET", "/news/search", params={"query": query, "page": page, "page_size": limit})
-
-    def summarize_article(self, article_id: str, summary_length: str = "medium") -> Dict[str, Any]:
-        return self._request("GET", f"/news/summary/{article_id}")
+    def search_news(
+        self,
+        query: str,
+        page: int = 1,
+        limit: int = 10,
+        topics: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        sort_by: str = "relevance",
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "query": query,
+            "page": page,
+            "page_size": limit,
+            "sort_by": sort_by,
+        }
+        if topics:
+            params["topics"] = topics
+        if sources:
+            params["sources"] = sources
+        if from_date:
+            params["from_date"] = from_date
+        if to_date:
+            params["to_date"] = to_date
+        return self._request("GET", "/news/search", params=params)
 
     def trigger_news_fetch(
         self,

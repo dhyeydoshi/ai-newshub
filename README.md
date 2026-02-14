@@ -1,4 +1,4 @@
-﻿# News Summarizer API
+﻿# News Central API
 
 FastAPI-based news platform for multi-source ingestion, normalization, deduplication, personalization, and analytics.
 

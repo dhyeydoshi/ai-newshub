@@ -32,7 +32,7 @@ class Config:
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Page Configuration
-    PAGE_TITLE: str = "News Summarizer"
+    PAGE_TITLE: str = "News Central"
     PAGE_ICON: str = ""
     LAYOUT: str = "wide"
 

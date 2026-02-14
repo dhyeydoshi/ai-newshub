@@ -24,53 +24,63 @@ def main() -> None:
     if auth_notice:
         st.warning(auth_notice)
 
+    # ── Hero ──
     st.markdown(
         """
         <div class="hero">
-            <div class="hero-badge">News Aggregation + Personalization</div>
+            <div class="hero-badge">:material/rss_feed: &nbsp; News Aggregation + Personalization</div>
             <h1>Signal Over Noise</h1>
             <p class="hero-subtitle">
-                Multi-source ingestion, clean summaries, and a feed that learns from what you read.
+                Multi-source ingestion, curated content, and a feed that learns from what you read.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Start here")
-
+    # ── CTAs ──
     if st.session_state.get("is_authenticated", False):
         st.success(f"Welcome back, **{st.session_state.get('username', 'User')}**!")
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            if st.button("Open News Feed", use_container_width=True, type="primary"):
+            if st.button(
+                ":material/newspaper: Open News Feed",
+                use_container_width=True,
+                type="primary",
+            ):
                 switch_page("news-feed")
         with col_b:
-            if st.button("View Profile", use_container_width=True):
+            if st.button(":material/person: View Profile", use_container_width=True):
                 switch_page("profile")
         with col_c:
-            if st.button("Logout", use_container_width=True):
+            if st.button(":material/logout: Logout", use_container_width=True):
                 logout()
     else:
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Log In", use_container_width=True, type="primary"):
+            if st.button(
+                ":material/login: Log In",
+                use_container_width=True,
+                type="primary",
+            ):
                 switch_page("login")
         with col_b:
-            if st.button("Create Account", use_container_width=True):
+            if st.button(":material/person_add: Create Account", use_container_width=True):
                 st.session_state["show_register"] = True
                 switch_page("login")
 
     st.divider()
 
+    # ── Feature cards ──
     st.markdown("### What you get")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(
             """
             <div class="feature-card">
+                <div class="card-icon">🌐</div>
                 <h4>Multi-source coverage</h4>
-                <p class="subtle">Aggregate NewsAPI, GDELT, and RSS into one stream.</p>
+                <p class="subtle">Aggregate NewsAPI, GDELT, and RSS into one stream — no tab-hopping required.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -79,8 +89,9 @@ def main() -> None:
         st.markdown(
             """
             <div class="feature-card">
-                <h4>Clean, fast summaries</h4>
-                <p class="subtle">Scan key points quickly, then dive into full articles.</p>
+                <div class="card-icon">📰</div>
+                <h4>Clean, focused reading</h4>
+                <p class="subtle">Full articles with key topics highlighted and related content at your fingertips.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -89,8 +100,9 @@ def main() -> None:
         st.markdown(
             """
             <div class="feature-card">
+                <div class="card-icon">🎯</div>
                 <h4>Personalized ranking</h4>
-                <p class="subtle">Your feedback helps refine the feed over time.</p>
+                <p class="subtle">Your feedback trains a ranking model so the feed gets smarter every day.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -98,18 +110,40 @@ def main() -> None:
 
     st.divider()
 
-    st.markdown("### Workflow")
+    # ── Workflow — numbered steps ──
+    st.markdown("### How it works")
     st.markdown(
-        "1. Connect and aggregate sources. "
-        "2. Read summaries and full stories. "
-        "3. Give feedback to personalize your feed."
+        """
+        <div class="workflow-step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+                <h4>Connect &amp; aggregate sources</h4>
+                <p>News is fetched automatically from dozens of RSS feeds, NewsAPI, and GDELT.</p>
+            </div>
+        </div>
+        <div class="workflow-step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+                <h4>Read &amp; discover</h4>
+                <p>Browse the latest articles, search by keyword, and explore related content.</p>
+            </div>
+        </div>
+        <div class="workflow-step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+                <h4>Give feedback &amp; personalize</h4>
+                <p>A thumbs-up or thumbs-down trains the model — your feed improves with every interaction.</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.divider()
 
     st.markdown(
         """
-        <div style='text-align: center; padding: 2rem 0; color: #666;'>
+        <div class="app-footer">
             <p>Built with FastAPI, PostgreSQL, Redis, and Reinforcement Learning</p>
         </div>
         """,

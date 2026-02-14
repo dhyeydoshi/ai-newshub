@@ -7,7 +7,7 @@ from utils.navigation import switch_page
 from utils.ui_helpers import init_page_config, apply_custom_css, show_error, show_success
 
 # Initialize
-init_page_config("Login | News Summarizer", "")
+init_page_config("Login | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -62,14 +62,14 @@ def validate_username(username: str) -> tuple[bool, str]:
 
 
 def main() -> None:
-    st.title("Authentication")
+    st.title(":material/lock_open: Authentication")
 
     # Tabs for Login and Register
     default_tab = "Register" if st.session_state.pop("show_register", False) else "Login"
     tab1, tab2 = st.tabs(["Login", "Register"], default=default_tab)
 
     with tab1:
-        st.markdown("### Welcome Back!")
+        st.markdown("### :material/login: Welcome Back!")
         st.caption("Enter your credentials to access your personalized news feed")
 
         with st.form("login_form"):
@@ -121,7 +121,7 @@ def main() -> None:
                 st.info("Switch to the Register tab above!")
 
     with tab2:
-        st.markdown("### Create Your Account")
+        st.markdown("### :material/person_add: Create Your Account")
         st.caption("Join thousands of users getting personalized news recommendations")
 
         with st.form("register_form"):
@@ -218,15 +218,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown(
-            """
-        #### Security Features
-        - End-to-end encryption
-        - JWT token authentication
-        - Secure password hashing
-        - Email verification (optional)
-        """
-        )
+        st.caption(":material/shield: Secured with JWT authentication and encrypted passwords.")
 
 
 if __name__ == "__main__":
