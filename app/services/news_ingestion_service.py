@@ -196,11 +196,13 @@ class NewsIngestionService:
         limit_per_feed: int,
         deduplicate: bool,
         topic_hints: Optional[Sequence[str]] = None,
+        language: str = "en",
     ) -> Dict[str, Any]:
         fetched_articles = await aggregator.fetch_from_rss_feeds(
             feed_urls=list(feed_urls),
             limit_per_feed=limit_per_feed,
-            deduplicate=deduplicate
+            deduplicate=deduplicate,
+            language=language,
         )
 
         prepared_articles, pipeline_stats = self.prepare_articles_for_persistence(

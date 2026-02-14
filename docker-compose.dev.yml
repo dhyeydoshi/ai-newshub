@@ -1,0 +1,13 @@
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+
+  frontend:
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      DEBUG: "true"

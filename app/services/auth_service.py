@@ -295,6 +295,8 @@ class AuthService:
             subject=str(user.user_id),
             session_id=str(session.session_id)
         )
+        refresh_payload = jwt_manager.decode_token(refresh_token)
+        session.refresh_token_jti = refresh_payload.get("jti")
 
         cookie_config = self._create_remember_me_cookie(refresh_token, login_data.remember_me)
 
@@ -345,6 +347,22 @@ class AuthService:
         session = result.scalar_one_or_none()
 
         if not session:
+            # Secondary lookup provides clearer diagnostics for stale/mismatched refresh tokens.
+            fallback = await db.execute(
+                select(UserSession).where(
+                    and_(
+                        UserSession.session_id == session_id,
+                        UserSession.is_active == True
+                    )
+                )
+            )
+            fallback_session = fallback.scalar_one_or_none()
+            if fallback_session:
+                logger.warning(
+                    "Refresh token rejected due to JTI mismatch for active session_id=%s user_id=%s",
+                    session_id,
+                    user_id,
+                )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session not found or revoked"
@@ -587,7 +605,8 @@ class AuthService:
         session = UserSession(
             user_id=user.user_id,
             session_id=uuid.uuid4(),
-            refresh_token_jti=pwd_hasher.generate_secure_token(16),
+            # Set after the refresh JWT is minted so DB JTI and token JTI stay in sync.
+            refresh_token_jti=None,
             ip_address=ip_address,
             user_agent=user_agent,
             expires_at=expires_at

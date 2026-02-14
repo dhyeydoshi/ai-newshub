@@ -1,5 +1,6 @@
 from app.utils.celery_helpers import (
     get_celery_status,
+    get_celery_runtime_heartbeat,
     get_last_fetch_time,
     trigger_manual_fetch,
     get_task_status,
@@ -9,6 +10,7 @@ from app.utils.celery_helpers import (
 
 __all__ = [
     'get_celery_status',
+    'get_celery_runtime_heartbeat',
     'get_last_fetch_time',
     'trigger_manual_fetch',
     'get_task_status',

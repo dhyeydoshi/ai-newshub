@@ -45,6 +45,16 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         """Validate authentication for protected endpoints"""
         from fastapi.responses import JSONResponse
 
+        # Feature flag gate for integration APIs: fail fast before auth/dependency work.
+        if (
+            request.url.path.startswith("/api/v1/integration")
+            or request.url.path.startswith("/api/v1/integrations")
+        ) and not settings.ENABLE_INTEGRATION_API:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"detail": "Integration API is disabled"},
+            )
+
         # Skip authentication for public endpoints
         if self._is_public_path(request.url.path):
             return await call_next(request)

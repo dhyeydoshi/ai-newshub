@@ -118,17 +118,35 @@ class APIKeyService:
             select(UserAPIKey).where(
                 UserAPIKey.api_key_id == key_id,
                 UserAPIKey.user_id == user_id,
-                UserAPIKey.is_active.is_(True),
             )
         )
         key = result.scalar_one_or_none()
         if not key:
             return False
 
-        key.is_active = False
-        key.revoked_at = datetime.now(timezone.utc)
-        await db.commit()
+        if key.is_active:
+            key.is_active = False
+            key.revoked_at = datetime.now(timezone.utc)
+            await db.commit()
+            await cls._invalidate_validation_cache(key.key_hash)
+        return True
+
+    @classmethod
+    async def delete_key(cls, *, key_id: UUID, user_id: UUID, db: AsyncSession) -> bool:
+        result = await db.execute(
+            select(UserAPIKey).where(
+                UserAPIKey.api_key_id == key_id,
+                UserAPIKey.user_id == user_id,
+                UserAPIKey.is_active.is_(False),
+            )
+        )
+        key = result.scalar_one_or_none()
+        if not key:
+            return False
+
         await cls._invalidate_validation_cache(key.key_hash)
+        await db.delete(key)
+        await db.commit()
         return True
 
     @classmethod

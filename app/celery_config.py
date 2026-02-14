@@ -75,6 +75,10 @@ celery_app.conf.update(
             'queue': _queue_name('news_maintenance'),
             'routing_key': 'news.maintenance'
         },
+        'app.tasks.news_tasks.record_celery_runtime_heartbeat': {
+            'queue': _queue_name('news_maintenance'),
+            'routing_key': 'news.maintenance'
+        },
         'app.tasks.webhook_tasks.plan_webhook_batches': {
             'queue': _queue_name('integration_planner'),
             'routing_key': 'integration.plan'
@@ -112,6 +116,15 @@ celery_app.conf.update(
 
 # Celery Beat Schedule (Periodic Tasks)
 celery_app.conf.beat_schedule = {
+    # Lightweight runtime heartbeat for worker+beat observability
+    'record-celery-runtime-heartbeat': {
+        'task': 'app.tasks.news_tasks.record_celery_runtime_heartbeat',
+        'schedule': settings.CELERY_HEARTBEAT_INTERVAL_SECONDS,
+        'options': {
+            'expires': max(settings.CELERY_HEARTBEAT_TTL_SECONDS, settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2),
+        }
+    },
+
     # Fetch news every 2 hours
     'fetch-news-every-2-hours': {
         'task': 'app.tasks.news_tasks.fetch_and_save_news',

@@ -1,7 +1,8 @@
-﻿import time
+import time
 import streamlit as st
 from services.api_service import api_service
 from utils.auth import init_auth_state, require_auth
+from utils.navigation import switch_page
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
@@ -31,7 +32,7 @@ def main() -> None:
     if not article_id:
         st.warning("No article selected. Please select an article from the feed.")
         if st.button("Back to Feed"):
-            st.switch_page("pages/03_News_Feed.py")
+            switch_page("news-feed")
         st.stop()
 
     if st.session_state.article_start_time is None:
@@ -43,7 +44,7 @@ def main() -> None:
     if not result["success"]:
         show_error(f"Failed to load article: {result.get('error')}")
         if st.button("Back to Feed"):
-            st.switch_page("pages/03_News_Feed.py")
+            switch_page("news-feed")
         st.stop()
 
     article = result["data"]
@@ -59,7 +60,7 @@ def main() -> None:
                 time_spent_seconds=reading_time,
             )
             st.session_state.article_start_time = None
-            st.switch_page("pages/03_News_Feed.py")
+            switch_page("news-feed")
 
     st.divider()
 
@@ -76,17 +77,12 @@ def main() -> None:
             st.caption(f"Author: {article.get('author')}")
 
     if article.get("topics"):
-        topics_html = " ".join(
-            [
-                (
-                    "<span style=\"background-color: #e3f2fd; padding: 4px 12px; "
-                    "border-radius: 12px; margin-right: 8px; font-size: 0.9em;\">"
-                    f"{topic}</span>"
-                )
-                for topic in article["topics"][:5]
-            ]
-        )
-        st.markdown(topics_html, unsafe_allow_html=True)
+        topics = article["topics"][:5]
+        col_spec = [1] * len(topics) + [max(1, 12 - len(topics))]
+        topic_cols = st.columns(col_spec, gap="small")
+        for i, topic in enumerate(topics):
+            with topic_cols[i]:
+                st.badge(topic, color="blue")
 
     st.divider()
 
@@ -152,40 +148,23 @@ def main() -> None:
         st.markdown("### Your Feedback")
         st.caption("Help us improve your recommendations by rating this article")
 
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            if st.button("Liked It", use_container_width=True, type="primary"):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="positive",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
-
-        with col2:
-            if st.button("Neutral", use_container_width=True):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="neutral",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
-
-        with col3:
-            if st.button("Not Interested", use_container_width=True):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="negative",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
+        feedback_options = [
+            ("Liked It", "positive", "primary"),
+            ("Neutral", "neutral", "secondary"),
+            ("Not Interested", "negative", "secondary"),
+        ]
+        cols = st.columns(3)
+        for col, (label, ftype, btype) in zip(cols, feedback_options):
+            with col:
+                if st.button(label, use_container_width=True, type=btype):
+                    reading_time = int(time.time() - st.session_state.article_start_time)
+                    result = api_service.submit_feedback(
+                        article_id=article_id,
+                        feedback_type=ftype,
+                        time_spent_seconds=reading_time,
+                    )
+                    if result["success"]:
+                        show_toast("Thanks for your feedback!")
 
         st.divider()
 
@@ -211,24 +190,44 @@ def main() -> None:
         with show_loading("Loading related articles..."):
             result = api_service.get_latest_news(
                 page=1,
-                limit=3,
-                topics=article["topics"][:2],
+                limit=6,
+                topics=article["topics"][:3],
+                language="en",
             )
 
         if result["success"]:
-            related_articles = result["data"].get("articles", [])[:3]
+            all_articles = result["data"].get("articles", [])
+            related_articles = [
+                a for a in all_articles
+                if str(a.get("article_id", a.get("id"))) != str(article_id)
+            ][:3]
 
-            cols = st.columns(3)
-            for idx, related in enumerate(related_articles):
-                with cols[idx]:
-                    st.markdown(f"**{related.get('title', 'Untitled')[:50]}...**")
-                    st.caption(f"{related.get('source', 'Unknown')}")
-                    if st.button("Read", key=f"related_{idx}"):
-                        st.session_state.selected_article = related.get(
-                            "article_id", related.get("id")
+            if related_articles:
+                cols = st.columns(3)
+                for idx, related in enumerate(related_articles):
+                    with cols[idx]:
+                        title = related.get("title", "Untitled")
+                        display_title = title[:80] + "..." if len(title) > 80 else title
+                        st.markdown(f"**{display_title}**")
+                        st.caption(
+                            f"{related.get('source_name', 'Unknown')}  •  "
+                            f"{format_date(related.get('published_date', ''))}"
                         )
-                        st.session_state.article_start_time = None
-                        st.rerun()
+                        if related.get("topics"):
+                            for topic in related["topics"][:2]:
+                                st.badge(topic, color="blue")
+                        if st.button("Read", key=f"related_{idx}"):
+                            st.session_state.selected_article = str(
+                                related.get("article_id", related.get("id"))
+                            )
+                            st.session_state.article_start_time = None
+                            st.rerun()
+            else:
+                st.info("No related articles found.")
+        else:
+            st.info("Could not load related articles.")
+    else:
+        st.info("No topics available to find related articles.")
 
 
 if __name__ == "__main__":

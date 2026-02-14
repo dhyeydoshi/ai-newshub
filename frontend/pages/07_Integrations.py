@@ -1,15 +1,9 @@
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
 
-# Add frontend root to Python path for direct page execution.
-frontend_dir = Path(__file__).parent.parent
-if str(frontend_dir) not in sys.path:
-    sys.path.insert(0, str(frontend_dir))
-
 from services.api_service import api_service
+from frontend_config import config
 from utils.auth import init_auth_state, require_auth
 from utils.ui_helpers import (
     apply_custom_css,
@@ -25,6 +19,17 @@ init_page_config("Integrations | News Summarizer", "")
 apply_custom_css()
 init_auth_state()
 
+SUPPORTED_INTEGRATION_SCOPES: List[Dict[str, str]] = [
+    {
+        "scope": "feed:read",
+        "description": "Required to read public feed/bundle endpoints under /api/v1/integration/*",
+    },
+    {
+        "scope": "*",
+        "description": "Wildcard access to all scopes (use cautiously)",
+    },
+]
+
 
 def _safe_list(value: Any) -> List[Dict[str, Any]]:
     if isinstance(value, list):
@@ -38,6 +43,37 @@ def _safe_dict(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _get_api_key_vault() -> Dict[str, str]:
+    vault = st.session_state.setdefault("integration_api_key_vault", {})
+    if not isinstance(vault, dict):
+        vault = {}
+        st.session_state["integration_api_key_vault"] = vault
+    return vault
+
+
+def _remember_plain_api_key(payload: Dict[str, Any]) -> None:
+    key_id = str(payload.get("key_id") or payload.get("api_key_id") or "").strip()
+    plain_key = str(payload.get("api_key") or "").strip()
+    if key_id and plain_key:
+        vault = _get_api_key_vault()
+        vault[key_id] = plain_key
+
+
+def _forget_plain_api_key(key_id: str) -> None:
+    vault = _get_api_key_vault()
+    vault.pop(str(key_id), None)
+
+
+def _mask_api_key(plain_key: Optional[str], prefix: str) -> str:
+    key = str(plain_key or "").strip()
+    if key:
+        if len(key) <= 16:
+            return f"{key[:4]}...{key[-2:]}"
+        return f"{key[:10]}...{key[-6:]}"
+    prefix_clean = str(prefix or "").strip()
+    return f"{prefix_clean}..." if prefix_clean else "Unavailable"
+
+
 def _load_integrations_data() -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "api_keys": [],
@@ -46,6 +82,7 @@ def _load_integrations_data() -> Dict[str, Any]:
         "webhooks": [],
         "stats": {},
         "errors": [],
+        "disabled": False,
     }
 
     calls = [
@@ -59,7 +96,11 @@ def _load_integrations_data() -> Dict[str, Any]:
     for name, fn in calls:
         result = fn()
         if not result.get("success"):
-            data["errors"].append(f"{name}: {result.get('error', 'request failed')}")
+            error_message = str(result.get("error", "request failed"))
+            if "integration api is disabled" in error_message.lower():
+                data["disabled"] = True
+                break
+            data["errors"].append(f"{name}: {error_message}")
             continue
         payload = result.get("data")
         if name == "api_keys":
@@ -78,6 +119,13 @@ def _load_integrations_data() -> Dict[str, Any]:
 def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
     st.markdown("### API Keys")
     st.caption("Create and manage per-user integration keys.")
+    with st.expander("Supported integration scopes", expanded=True):
+        st.table(
+            [
+                {"Scope": row["scope"], "Description": row["description"]}
+                for row in SUPPORTED_INTEGRATION_SCOPES
+            ]
+        )
 
     with st.form("create_api_key_form", clear_on_submit=True):
         col1, col2 = st.columns([2, 1])
@@ -86,61 +134,108 @@ def _show_api_keys(api_keys: List[Dict[str, Any]]) -> None:
         with col2:
             expires_days = st.number_input("Expires in days", min_value=1, max_value=365, value=30)
 
-        scopes_raw = st.text_input("Scopes (comma-separated)", value="feed:read")
+        scope_defaults = ["feed:read"]
+        selected_scopes = st.multiselect(
+            "Scopes",
+            options=[row["scope"] for row in SUPPORTED_INTEGRATION_SCOPES],
+            default=scope_defaults,
+            help="Select supported scopes for this key.",
+        )
+        scopes_raw = st.text_input(
+            "Additional scopes (optional, comma-separated)",
+            value="",
+            help="Use only if backend supports extra custom scopes.",
+        )
         submitted = st.form_submit_button("Create API key", type="primary")
         if submitted:
-            scopes = [s.strip() for s in scopes_raw.split(",") if s.strip()]
+            custom_scopes = [s.strip() for s in scopes_raw.split(",") if s.strip()]
+            scopes = list(dict.fromkeys([*selected_scopes, *custom_scopes])) or ["feed:read"]
             result = api_service.create_api_key(name=key_name, scopes=scopes, expires_in_days=int(expires_days))
             if result.get("success"):
                 created = _safe_dict(result.get("data"))
+                _remember_plain_api_key(created)
                 st.session_state["integration_last_api_key"] = created.get("api_key")
                 show_success("API key created.")
                 st.rerun()
             else:
                 show_error(result.get("error", "Failed to create API key"))
 
-    plain_key = st.session_state.pop("integration_last_api_key", None)
+    plain_key = st.session_state.get("integration_last_api_key")
     if plain_key:
-        st.warning("Save this API key now. It is shown only once.")
+        st.warning("Latest generated API key (available only in this browser session).")
         st.code(plain_key)
 
     if not api_keys:
         st.info("No API keys found.")
         return
 
-    for key in api_keys:
-        key_id = str(key.get("key_id", ""))
+    vault = _get_api_key_vault()
+
+    for idx, key in enumerate(api_keys):
+        key_id = str(key.get("key_id") or key.get("api_key_id") or "")
+        uid = key_id or str(idx)
         key_name = key.get("name", "Unnamed")
-        prefix = key.get("prefix", "")
+        prefix = key.get("prefix") or key.get("key_prefix") or ""
         request_count = key.get("request_count", 0)
         is_active = key.get("is_active", False)
+        created_at = key.get("created_at", "")
 
         col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
         with col1:
             st.write(f"**{key_name}**")
-            st.caption(f"Prefix: {prefix} | ID: {key_id}")
+            if created_at:
+                from utils.ui_helpers import format_date
+ 
+                st.caption(f"Created {format_date(created_at)}")
+            with st.expander("Show details"):
+                st.caption(f"**Prefix:** `{prefix}`")
+                st.caption(f"**ID:** `{key_id}`")
+                scopes = key.get("scopes") or ["feed:read"]
+                st.caption(f"**Scopes:** `{', '.join(scopes)}`")
+                cached_full_key = vault.get(key_id)
+                st.caption(f"**API Key (partial):** `{_mask_api_key(cached_full_key, prefix)}`")
+                if cached_full_key:
+                    st.caption("Full API key is available in this browser session for copy.")
+                    st.code(cached_full_key)
+                else:
+                    st.info("Full API key is not recoverable from backend. Rotate to generate a new copyable key.")
         with col2:
             st.metric("Requests", request_count)
         with col3:
             st.write("Status")
-            st.write("Active" if is_active else "Inactive")
+            if is_active:
+                st.badge("Active", color="green")
+            else:
+                st.badge("Inactive", color="red")
         with col4:
-            if st.button("Rotate", key=f"rotate_key_{key_id}"):
-                result = api_service.rotate_api_key(key_id)
-                if result.get("success"):
-                    created = _safe_dict(result.get("data"))
-                    st.session_state["integration_last_api_key"] = created.get("api_key")
-                    show_success("API key rotated.")
-                    st.rerun()
-                else:
-                    show_error(result.get("error", "Failed to rotate API key"))
-            if st.button("Revoke", key=f"revoke_key_{key_id}"):
-                result = api_service.revoke_api_key(key_id)
-                if result.get("success"):
-                    show_toast("API key revoked")
-                    st.rerun()
-                else:
-                    show_error(result.get("error", "Failed to revoke API key"))
+            if is_active:
+                if st.button("Rotate", key=f"rotate_key_{uid}"):
+                    result = api_service.rotate_api_key(key_id)
+                    if result.get("success"):
+                        created = _safe_dict(result.get("data"))
+                        _remember_plain_api_key(created)
+                        st.session_state["integration_last_api_key"] = created.get("api_key")
+                        show_success("API key rotated.")
+                        st.rerun()
+                    else:
+                        show_error(result.get("error", "Failed to rotate API key"))
+                if st.button("Revoke", key=f"revoke_key_{uid}"):
+                    result = api_service.revoke_api_key(key_id)
+                    if result.get("success"):
+                        _forget_plain_api_key(key_id)
+                        show_toast("API key revoked")
+                        st.rerun()
+                    else:
+                        show_error(result.get("error", "Failed to revoke API key"))
+            else:
+                if st.button("Delete", key=f"delete_key_{uid}", type="primary"):
+                    result = api_service.delete_api_key(key_id)
+                    if result.get("success"):
+                        _forget_plain_api_key(key_id)
+                        show_toast("API key deleted")
+                        st.rerun()
+                    else:
+                        show_error(result.get("error", "Failed to delete API key"))
         st.divider()
 
 
@@ -420,29 +515,50 @@ def _show_usage(stats: Dict[str, Any]) -> None:
         st.info("Usage data unavailable.")
         return
 
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown("#### Active Resources")
+    col1, col2 = st.columns(2)
     with col1:
         st.metric("Active API Keys", stats.get("active_api_keys", 0))
-    with col2:
         st.metric("Active Feeds", stats.get("active_feeds", 0))
-    with col3:
+    with col2:
         st.metric("Active Bundles", stats.get("active_bundles", 0))
-    with col4:
         st.metric("Active Webhooks", stats.get("active_webhooks", 0))
 
     jobs = _safe_dict(stats.get("delivery_jobs"))
-    col5, col6, col7 = st.columns(3)
+    st.markdown("#### Delivery Jobs")
+    col3, col4, col5 = st.columns(3)
+    with col3:
+        st.metric("Delivered", jobs.get("delivered", 0))
+    with col4:
+        st.metric("Queued", jobs.get("queued", 0))
     with col5:
-        st.metric("Delivered Jobs", jobs.get("delivered", 0))
-    with col6:
-        st.metric("Queued Jobs", jobs.get("queued", 0))
-    with col7:
-        st.metric("Failed Jobs", jobs.get("failed_or_dead_letter", 0))
+        st.metric("Failed/Dead Letter", jobs.get("failed_or_dead_letter", 0))
 
     limits = _safe_dict(stats.get("limits"))
     if limits:
         st.markdown("#### Limits")
-        st.json(limits)
+        label_map = {
+            "max_api_keys_per_user": "Max API Keys per User",
+            "max_feeds_per_user": "Max Feeds per User",
+            "max_bundles_per_user": "Max Bundles per User",
+            "max_feeds_per_bundle": "Max Feeds per Bundle",
+            "max_webhooks_per_user": "Max Webhooks per User",
+            "min_batch_interval_minutes": "Min Batch Interval (Minutes)",
+            "max_items_per_batch": "Max Items per Batch",
+        }
+
+        rows: List[Dict[str, Any]] = []
+        for key in label_map:
+            if key in limits:
+                rows.append({"Limit": label_map[key], "Value": limits.get(key)})
+
+        # Render unknown keys too, if backend adds new limits in future.
+        for key, value in limits.items():
+            if key not in label_map:
+                rows.append({"Limit": key.replace("_", " ").title(), "Value": value})
+
+        if rows:
+            st.table(rows)
 
 
 @require_auth
@@ -450,11 +566,19 @@ def main() -> None:
     st.title("Integrations")
     st.caption("Manage API keys, custom feeds, bundles, and webhooks.")
 
+    if not config.ENABLE_INTEGRATIONS:
+        st.info("Integrations are disabled in configuration. Set ENABLE_INTEGRATION_API=true to enable this feature.")
+        return
+
     if st.button("Refresh", use_container_width=False):
         st.rerun()
 
     with show_loading("Loading integration data..."):
         data = _load_integrations_data()
+
+    if data.get("disabled"):
+        st.info("Integrations are disabled on the backend. Enable ENABLE_INTEGRATION_API to use this page.")
+        return
 
     errors = data.get("errors", [])
     for error in errors:

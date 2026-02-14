@@ -1,6 +1,7 @@
 ﻿import streamlit as st
 from frontend_config import config
 from utils.auth import init_auth_state, logout
+from utils.navigation import switch_page
 from utils.ui_helpers import init_page_config, apply_custom_css
 
 # Initialize page configuration
@@ -43,10 +44,10 @@ def main() -> None:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             if st.button("Open News Feed", use_container_width=True, type="primary"):
-                st.switch_page("pages/03_News_Feed.py")
+                switch_page("news-feed")
         with col_b:
             if st.button("View Profile", use_container_width=True):
-                st.switch_page("pages/06_Profile.py")
+                switch_page("profile")
         with col_c:
             if st.button("Logout", use_container_width=True):
                 logout()
@@ -54,10 +55,11 @@ def main() -> None:
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("Log In", use_container_width=True, type="primary"):
-                st.switch_page("pages/02_Login.py")
+                switch_page("login")
         with col_b:
             if st.button("Create Account", use_container_width=True):
-                st.switch_page("pages/02_Login.py")
+                st.session_state["show_register"] = True
+                switch_page("login")
 
     st.divider()
 
@@ -109,9 +111,6 @@ def main() -> None:
         """
         <div style='text-align: center; padding: 2rem 0; color: #666;'>
             <p>Built with FastAPI, PostgreSQL, Redis, and Reinforcement Learning</p>
-            <p style='font-size: 0.9rem;'>
-                (c) 2024 News Summarizer. All rights reserved.
-            </p>
         </div>
         """,
         unsafe_allow_html=True,

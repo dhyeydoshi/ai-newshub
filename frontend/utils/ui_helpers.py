@@ -1,15 +1,16 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import List
 import streamlit as st
 
+from utils.navigation import switch_page
 
-def show_toast(message: str, icon: str = "", duration: int = 3) -> None:
-    """Show toast notification"""
+
+def show_toast(message: str, icon: str = "", duration: int = 4) -> None:
+    """Show toast notification with configurable duration (seconds)."""
+    kwargs: dict = {"duration": int(duration)}
     if icon:
-        st.toast(message, icon=icon)
-    else:
-        st.toast(message)
-    _ = duration
+        kwargs["icon"] = icon
+    st.toast(message, **kwargs)
 
 
 def format_date(date_str: str) -> str:
@@ -66,7 +67,8 @@ def show_article_card(article: dict, show_feedback: bool = True) -> None:
             st.caption(formatted_date)
         with col3:
             if article.get("topics"):
-                st.caption(", ".join(article["topics"][:2]))
+                for topic in article["topics"][:2]:
+                    st.badge(topic, color="blue")
 
         # Summary or content preview
         summary = article.get("summary", article.get("content", ""))
@@ -82,7 +84,7 @@ def show_article_card(article: dict, show_feedback: bool = True) -> None:
         with col1:
             if st.button("Read", key=f"read_{article_id}"):
                 st.session_state.selected_article = article_id
-                st.switch_page("pages/04_Article_View.py")
+                switch_page("article-view")
 
         if show_feedback:
             with col2:
@@ -104,9 +106,9 @@ def show_article_card(article: dict, show_feedback: bool = True) -> None:
         st.divider()
 
 
-def show_loading(message: str = "Loading..."):
-    """Show loading spinner"""
-    return st.spinner(message)
+def show_loading(message: str = "Loading...", show_time: bool = True):
+    """Show loading spinner with elapsed time."""
+    return st.spinner(message, show_time=show_time)
 
 
 def init_page_config(page_title: str, page_icon: str = "", layout: str = "wide") -> None:
@@ -250,41 +252,3 @@ def show_error(message: str) -> None:
 def show_success(message: str) -> None:
     """Display success message"""
     st.success(message)
-
-
-def show_info(message: str) -> None:
-    """Display info message"""
-    st.info(message)
-
-
-def show_warning(message: str) -> None:
-    """Display warning message"""
-    st.warning(message)
-
-
-def paginate_list(items: List, page: int, items_per_page: int) -> tuple:
-    """Paginate a list of items"""
-    total_pages = (len(items) + items_per_page - 1) // items_per_page
-    start_idx = (page - 1) * items_per_page
-    end_idx = start_idx + items_per_page
-    return items[start_idx:end_idx], total_pages
-
-
-def show_pagination(current_page: int, total_pages: int, key_prefix: str = "page") -> int:
-    """Display pagination controls"""
-    col1, col2, col3 = st.columns([1, 2, 1])
-
-    with col1:
-        if current_page > 1:
-            if st.button("Previous", key=f"{key_prefix}_prev"):
-                return current_page - 1
-
-    with col2:
-        st.write(f"Page {current_page} of {total_pages}")
-
-    with col3:
-        if current_page < total_pages:
-            if st.button("Next", key=f"{key_prefix}_next"):
-                return current_page + 1
-
-    return current_page

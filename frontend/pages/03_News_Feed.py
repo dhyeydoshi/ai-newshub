@@ -127,6 +127,7 @@ def main() -> None:
                 "Search query",
                 placeholder="Enter keywords...",
                 key="search_query",
+                icon=":material/search:",
             )
 
             if st.button("Search", use_container_width=True, type="primary"):

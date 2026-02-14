@@ -3,6 +3,7 @@ import time
 import streamlit as st
 from services.api_service import api_service
 from utils.auth import init_auth_state
+from utils.navigation import switch_page
 from utils.ui_helpers import init_page_config, apply_custom_css, show_error, show_success
 
 # Initialize
@@ -10,17 +11,21 @@ init_page_config("Login | News Summarizer", "")
 apply_custom_css()
 init_auth_state()
 
+auth_notice = st.session_state.pop("auth_notice", None)
+if auth_notice:
+    st.info(auth_notice)
+
 if not st.session_state.get("is_authenticated", False):
     if api_service.auto_login():
         st.success("Welcome back! Auto-login successful.")
         time.sleep(1)
-        st.switch_page("pages/03_News_Feed.py")
+        switch_page("news-feed")
 
 # Redirect if already authenticated
 if st.session_state.get("is_authenticated", False):
     st.success("You are already logged in!")
     if st.button("Go to News Feed"):
-        st.switch_page("pages/03_News_Feed.py")
+        switch_page("news-feed")
     st.stop()
 
 
@@ -60,7 +65,8 @@ def main() -> None:
     st.title("Authentication")
 
     # Tabs for Login and Register
-    tab1, tab2 = st.tabs(["Login", "Register"])
+    default_tab = "Register" if st.session_state.pop("show_register", False) else "Login"
+    tab1, tab2 = st.tabs(["Login", "Register"], default=default_tab)
 
     with tab1:
         st.markdown("### Welcome Back!")
@@ -71,6 +77,7 @@ def main() -> None:
                 "Email Address",
                 placeholder="your.email@example.com",
                 help="Enter your registered email address",
+                icon=":material/email:",
             )
 
             password = st.text_input(
@@ -78,6 +85,7 @@ def main() -> None:
                 type="password",
                 placeholder="Enter your password",
                 help="Your account password",
+                icon=":material/lock:",
             )
 
             col1, col2 = st.columns([3, 1])
@@ -124,6 +132,7 @@ def main() -> None:
                     "Full Name",
                     placeholder="John Doe",
                     help="Your full name",
+                    icon=":material/person:",
                 )
 
             with col2:
@@ -131,12 +140,14 @@ def main() -> None:
                     "Username",
                     placeholder="johndoe",
                     help="Unique username (3-20 characters)",
+                    icon=":material/alternate_email:",
                 )
 
             email = st.text_input(
                 "Email Address",
                 placeholder="your.email@example.com",
                 help="Your email address",
+                icon=":material/email:",
             )
 
             col1, col2 = st.columns(2)
@@ -147,6 +158,7 @@ def main() -> None:
                     type="password",
                     placeholder="Create a strong password",
                     help="Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char",
+                    icon=":material/lock:",
                 )
 
             with col2:
@@ -154,6 +166,7 @@ def main() -> None:
                     "Confirm Password",
                     type="password",
                     placeholder="Re-enter your password",
+                    icon=":material/lock:",
                 )
 
             if password:

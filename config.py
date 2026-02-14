@@ -81,6 +81,24 @@ class Settings(BaseSettings):
         default=None,
         description="Celery result backend URL (defaults to broker URL)"
     )
+    CELERY_HEARTBEAT_INTERVAL_SECONDS: int = Field(
+        default=60,
+        ge=30,
+        le=300,
+        description="Interval for runtime Celery heartbeat task"
+    )
+    CELERY_HEARTBEAT_TTL_SECONDS: int = Field(
+        default=180,
+        ge=60,
+        le=900,
+        description="Redis TTL for Celery heartbeat keys"
+    )
+    CELERY_HEARTBEAT_LOG_INTERVAL_SECONDS: int = Field(
+        default=60,
+        ge=30,
+        le=600,
+        description="API monitor interval for Celery heartbeat warnings"
+    )
 
     SECRET_KEY: str = Field(
         default="",

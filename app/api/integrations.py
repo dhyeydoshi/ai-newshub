@@ -23,13 +23,17 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/integration", tags=["Integration API"])
-SortMode = Literal["date", "relevance"]
-
-
 def _ensure_enabled() -> None:
     if not settings.ENABLE_INTEGRATION_API:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration API is disabled")
+
+
+router = APIRouter(
+    prefix="/integration",
+    tags=["Integration API"],
+    dependencies=[Depends(_ensure_enabled)],
+)
+SortMode = Literal["date", "relevance"]
 
 
 def _extract_integration_token(request: Request, query_token: Optional[str]) -> str:

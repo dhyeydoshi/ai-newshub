@@ -45,7 +45,17 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/integrations", tags=["Integration Management"])
+
+def _ensure_enabled() -> None:
+    if not settings.ENABLE_INTEGRATION_API:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration API is disabled")
+
+
+router = APIRouter(
+    prefix="/integrations",
+    tags=["Integration Management"],
+    dependencies=[Depends(_ensure_enabled)],
+)
 
 
 def _parse_user_id(user_id: str) -> UUID:
@@ -88,11 +98,6 @@ def _to_bundle_response(bundle: UserFeedBundle, request: Request, feed_ids: List
         feed_ids=feed_ids,
         **_build_entity_urls(request, "bundles", bundle.slug),
     )
-
-
-def _ensure_enabled() -> None:
-    if not settings.ENABLE_INTEGRATION_API:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration API is disabled")
 
 
 def _to_webhook_response(webhook: UserWebhook) -> WebhookResponse:
@@ -160,6 +165,19 @@ async def revoke_api_key(
     if not revoked:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     return MessageResponse(message="API key revoked", success=True)
+
+
+@router.delete("/api-keys/{key_id}/permanent", response_model=MessageResponse)
+async def delete_api_key(
+    key_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _ensure_enabled()
+    deleted = await api_key_service.delete_key(key_id=key_id, user_id=_parse_user_id(user_id), db=db)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found or still active")
+    return MessageResponse(message="API key permanently deleted", success=True)
 
 
 @router.post("/api-keys/{key_id}/rotate", response_model=APIKeyCreateResponse)

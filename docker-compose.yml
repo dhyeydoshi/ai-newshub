@@ -152,6 +152,8 @@
         condition: service_healthy
       api:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks:
       - news-network
 
@@ -208,6 +210,8 @@
         condition: service_healthy
       api:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks:
       - news-network
 
@@ -219,6 +223,7 @@
     environment:
       API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://api:8000}
       API_VERSION: ${FRONTEND_API_VERSION:-v1}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
       DEBUG: ${DEBUG:-false}
     depends_on:
       api:

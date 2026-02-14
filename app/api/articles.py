@@ -198,7 +198,11 @@ async def get_scheduler_status(
 ):
     """Get Celery worker and scheduler status"""
     try:
-        from app.utils.celery_helpers import get_celery_status, get_last_fetch_time
+        from app.utils.celery_helpers import (
+            get_celery_status,
+            get_celery_runtime_heartbeat,
+            get_last_fetch_time,
+        )
         from main import redis_client
 
         # Get Celery status
@@ -206,14 +210,17 @@ async def get_scheduler_status(
 
         # Get last fetch time from Redis (reuse global client)
         last_fetch = None
+        runtime_heartbeat = {"status": "unavailable"}
         if redis_client:
             try:
                 last_fetch = await get_last_fetch_time(redis_client)
+                runtime_heartbeat = await get_celery_runtime_heartbeat(redis_client)
             except Exception as e:
-                logger.error(f"Error getting last fetch time: {e}")
+                logger.error(f"Error getting scheduler runtime details: {e}")
 
         return {
             "celery": celery_status,
+            "runtime_heartbeat": runtime_heartbeat,
             "last_fetch": last_fetch.isoformat() if last_fetch else None,
             "scheduler_type": "Celery Beat",
             "message": "News fetching runs automatically via Celery worker"

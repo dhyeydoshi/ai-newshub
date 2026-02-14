@@ -1,6 +1,9 @@
 ﻿from typing import Optional
+
 import streamlit as st
+
 from services.api_service import api_service
+from utils.navigation import switch_page as _switch_page
 
 
 def init_auth_state() -> None:
@@ -36,12 +39,19 @@ def get_current_user() -> Optional[dict]:
     return None
 
 
+def redirect_to_login(message: str = "Please login to access this page") -> None:
+    """Redirect unauthenticated users to the login page."""
+    st.session_state["auth_notice"] = message
+    _switch_page("login")
+    st.stop()
+
+
 def require_auth(func):
     """Decorator to require authentication"""
+
     def wrapper(*args, **kwargs):
         if not is_authenticated():
-            st.warning("Please login to access this page")
-            st.stop()
+            redirect_to_login()
         return func(*args, **kwargs)
 
     return wrapper
@@ -59,4 +69,4 @@ def logout(all_devices: bool = False) -> None:
     if warning_message:
         st.session_state["auth_notice"] = warning_message
 
-    st.switch_page("Home.py")
+    _switch_page("home")

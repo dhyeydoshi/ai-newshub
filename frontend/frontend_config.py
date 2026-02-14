@@ -21,6 +21,10 @@ class Config:
 
     # Features
     ENABLE_ANALYTICS: bool = os.getenv("ENABLE_ANALYTICS", "true").lower() == "true"
+    ENABLE_INTEGRATIONS: bool = os.getenv(
+        "ENABLE_INTEGRATIONS",
+        os.getenv("ENABLE_INTEGRATION_API", "false"),
+    ).lower() == "true"
     ARTICLES_PER_PAGE: int = int(os.getenv("ARTICLES_PER_PAGE", "10"))
     CACHE_TTL: int = int(os.getenv("CACHE_TTL", "300"))
 

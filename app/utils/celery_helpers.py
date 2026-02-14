@@ -73,6 +73,61 @@ async def get_last_fetch_time(redis_client: aioredis.Redis) -> Optional[datetime
         return None
 
 
+def _normalize_timestamp(raw_timestamp: Any) -> Optional[datetime]:
+    if not raw_timestamp:
+        return None
+    if isinstance(raw_timestamp, bytes):
+        raw_timestamp = raw_timestamp.decode("utf-8")
+    try:
+        return datetime.fromisoformat(str(raw_timestamp))
+    except Exception:
+        return None
+
+
+def _heartbeat_entry(last_seen: Optional[datetime], now: datetime, ttl_seconds: int) -> Dict[str, Any]:
+    if not last_seen:
+        return {"status": "missing", "last_seen": None, "age_seconds": None}
+
+    age_seconds = max(0, int((now - last_seen).total_seconds()))
+    if age_seconds > ttl_seconds:
+        status = "stale"
+    else:
+        status = "fresh"
+    return {"status": status, "last_seen": last_seen.isoformat(), "age_seconds": age_seconds}
+
+
+async def get_celery_runtime_heartbeat(redis_client: aioredis.Redis) -> Dict[str, Any]:
+    try:
+        beat_key = redis_key("celery", "heartbeat", "beat")
+        worker_key = redis_key("celery", "heartbeat", "worker", "latest")
+        beat_raw, worker_raw = await redis_client.mget(beat_key, worker_key)
+
+        now = datetime.now(timezone.utc)
+        ttl_seconds = max(settings.CELERY_HEARTBEAT_TTL_SECONDS, settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2)
+        beat_entry = _heartbeat_entry(_normalize_timestamp(beat_raw), now, ttl_seconds)
+        worker_entry = _heartbeat_entry(_normalize_timestamp(worker_raw), now, ttl_seconds)
+
+        healthy = beat_entry["status"] == "fresh" and worker_entry["status"] == "fresh"
+        return {
+            "healthy": healthy,
+            "interval_seconds": settings.CELERY_HEARTBEAT_INTERVAL_SECONDS,
+            "ttl_seconds": ttl_seconds,
+            "beat": beat_entry,
+            "worker": worker_entry,
+        }
+    except Exception as e:
+        logger.error(f"Error getting Celery runtime heartbeat: {e}")
+        ttl_seconds = max(settings.CELERY_HEARTBEAT_TTL_SECONDS, settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2)
+        return {
+            "healthy": False,
+            "error": str(e),
+            "interval_seconds": settings.CELERY_HEARTBEAT_INTERVAL_SECONDS,
+            "ttl_seconds": ttl_seconds,
+            "beat": {"status": "unknown", "last_seen": None, "age_seconds": None},
+            "worker": {"status": "unknown", "last_seen": None, "age_seconds": None},
+        }
+
+
 async def trigger_manual_fetch(
     query: Optional[str] = None,
     queries: Optional[List[str]] = None,

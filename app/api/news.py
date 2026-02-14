@@ -23,6 +23,7 @@ class RSSFeedQuery(BaseModel):
     feed_urls: List[str] = Field(..., min_length=1, max_length=10)
     limit_per_feed: int = Field(10, ge=1, le=50)
     deduplicate: bool = Field(True)
+    language: str = Field("en", min_length=2, max_length=10)
 
     @field_validator("feed_urls")
     @classmethod
@@ -31,6 +32,11 @@ class RSSFeedQuery(BaseModel):
             if not url.startswith(('http://', 'https://')):
                 raise ValueError(f"Invalid URL: {url}")
         return v
+
+    @field_validator("language")
+    @classmethod
+    def normalize_language(cls, v: str) -> str:
+        return (v or "en").strip().lower()
 
 
 class ArticleResponse(BaseModel):
@@ -181,7 +187,8 @@ async def fetch_rss_feeds(
             aggregator=aggregator,
             feed_urls=query.feed_urls,
             limit_per_feed=query.limit_per_feed,
-            deduplicate=query.deduplicate
+            deduplicate=query.deduplicate,
+            language=query.language,
         )
         articles = result["articles"]
         pipeline_stats = result["pipeline_stats"]

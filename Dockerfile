@@ -27,7 +27,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Install dependencies separately for better layer caching
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + && \
+    find /opt/venv -type f -name '*.pyc' -delete && \
+    find /opt/venv -type f -name '*.pyo' -delete
 # ============================================================================
 # Stage 2: Runtime - Create minimal production image
 # ============================================================================
@@ -37,6 +40,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH="/app" \
     APP_HOME=/app
 
 # Install runtime dependencies only
@@ -76,6 +80,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 CMD ["uvicorn", "main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "4", \
+     "--workers", "1", \
      "--proxy-headers", \
      "--forwarded-allow-ips", "*"]

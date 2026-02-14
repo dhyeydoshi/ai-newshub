@@ -1,15 +1,8 @@
-﻿import sys
-from pathlib import Path
-
-# Add parent directory to Python path for imports
-frontend_dir = Path(__file__).parent.parent
-if str(frontend_dir) not in sys.path:
-    sys.path.insert(0, str(frontend_dir))
-
 import streamlit as st
 import plotly.graph_objects as go
 from services.api_service import api_service
 from utils.auth import init_auth_state, require_auth, logout
+from utils.navigation import switch_page
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
@@ -194,7 +187,7 @@ def main() -> None:
 
                         if st.button("Read Again", key=f"reread_{idx}"):
                             st.session_state.selected_article = item.get("article_id")
-                            st.switch_page("pages/04_Article_View.py")
+                            switch_page("article-view")
 
                         st.divider()
 

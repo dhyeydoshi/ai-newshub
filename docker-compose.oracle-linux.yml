@@ -13,8 +13,6 @@ services:
     cpus: "0.30"
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   redis:
     command: redis-server --appendonly no --save "" --maxmemory 50mb --maxmemory-policy allkeys-lru
@@ -23,8 +21,6 @@ services:
     cpus: "0.10"
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   api:
     command: >
