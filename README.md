@@ -112,8 +112,6 @@ DB_NAME=news_summarizer
 
 REDIS_URL=redis://localhost:6379/0
 REDIS_PASSWORD=<required-in-production>
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
 SECRET_KEY=<min-32-chars>
 JWT_ALGORITHM=RS256
