@@ -19,6 +19,18 @@ This README reflects the current codebase and recent refactors.
   - Redacted external HTTP errors persisted to delivery jobs
 - Webhook planner uses Redis lock to prevent duplicate batch planning runs.
 - Webhook test endpoint has dedicated throttling.
+- Multi-provider email: `smtp`, `graph` (app-only), `graph_msa` (delegated personal mailbox).
+- Email sender alias support (`SMTP_FROM_EMAIL` / Graph `from` field).
+- Shared HTML email layout with app-name footer across all templates.
+- SMTP delivery offloaded to thread pool (`asyncio.to_thread`).
+- Public `POST /auth/contact-developer` endpoint with strict rate limiting.
+- Frontend per-user HTTP sessions (no cross-user cookie leakage).
+- MD3-style Streamlit theming (light + dark) with Roboto font.
+- Security hardening:
+  - Token verification/reset use hash-only lookup (no plaintext fallback).
+  - `TRUSTED_PROXY_COUNT` for safe `X-Forwarded-For` parsing.
+  - Docker Compose requires `DB_PASSWORD` and `REDIS_PASSWORD` (fail-fast).
+  - Redis runs with `--requirepass`.
 
 ## Core Features
 
@@ -30,6 +42,9 @@ This README reflects the current codebase and recent refactors.
 - Celery tasks for scheduled and manual fetches
 - Redis-backed caching and rate limiting
 - JWT auth (RS256), secure middleware stack
+- Multi-provider email delivery (SMTP, Microsoft Graph app-only, Graph MSA delegated)
+- Public developer contact form with rate-limited email dispatch
+- Streamlit frontend with Material Design 3 theming
 
 ## High-Level Architecture
 
@@ -90,12 +105,13 @@ ENVIRONMENT=development
 DEBUG=false
 
 DB_USER=postgres
-DB_PASSWORD=password
+DB_PASSWORD=<required>
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=news_summarizer
 
 REDIS_URL=redis://localhost:6379/0
+REDIS_PASSWORD=<required-in-production>
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
@@ -114,6 +130,33 @@ ENABLE_INTEGRATION_DELIVERY=true
 INTEGRATION_KEY_HEADER=X-Integration-Key
 INTEGRATION_ENCRYPTION_KEY_CURRENT=<fernet-key>
 INTEGRATION_WEBHOOK_TEST_RATE_LIMIT_PER_HOUR=30
+
+# Email delivery (choose one: smtp, graph, graph_msa)
+EMAIL_DELIVERY_PROVIDER=smtp
+SMTP_HOST=smtp-mail.outlook.com
+SMTP_PORT=587
+SMTP_USER=your@email.com
+SMTP_PASSWORD=<app-password>
+SMTP_FROM_EMAIL=alias@domain.com          # optional sender alias
+SMTP_FROM_NAME=News Central
+
+# Graph app-only (alternative provider)
+# GRAPH_TENANT_ID=
+# GRAPH_CLIENT_ID=
+# GRAPH_CLIENT_SECRET=
+# GRAPH_SENDER_USER=
+
+# Graph MSA delegated (alternative provider)
+# GRAPH_MSA_CLIENT_ID=
+# GRAPH_MSA_AUTHORITY=https://login.microsoftonline.com/consumers
+# GRAPH_MSA_SCOPES=https://graph.microsoft.com/Mail.Send
+# GRAPH_MSA_TOKEN_CACHE_FILE=secrets/graph_msa_token_cache.json
+
+# Developer contact
+DEVELOPER_CONTACT_EMAIL=contact@domain.com
+
+# Proxy trust for rate limiting
+TRUSTED_PROXY_COUNT=0
 ```
 
 ## Database and Migrations
@@ -197,6 +240,32 @@ Integration delivery operations:
   - External webhook error payloads are redacted before persistence
   - Webhook test endpoint is rate-limited separately from management APIs
 
+## Email Delivery
+
+Three providers are supported via `EMAIL_DELIVERY_PROVIDER`:
+
+| Provider | Auth model | When to use |
+|---|---|---|
+| `smtp` | Username + app password | Standard SMTP relay (Outlook, Gmail, etc.) |
+| `graph` | Azure AD client credentials | Server-to-server with shared/service mailbox |
+| `graph_msa` | MSAL device-code (delegated) | Personal Microsoft account / consumer tenant |
+
+All providers support a sender alias via `SMTP_FROM_EMAIL`. SMTP delivery runs in a thread pool to avoid blocking the async event loop.
+
+For `graph_msa`, bootstrap the token cache before first use:
+
+```bash
+python scripts/bootstrap_graph_msa_token.py
+```
+
+This performs an interactive device-code login and persists the refresh token to `GRAPH_MSA_TOKEN_CACHE_FILE`.
+
+## Contact Developer
+
+`POST /api/v1/auth/contact-developer` is a public endpoint that sends the requester's message to `DEVELOPER_CONTACT_EMAIL`. It is rate-limited to 10 requests/minute and HTML-escapes all user input.
+
+The Streamlit sidebar exposes a "Let's connect" form (configurable via `DEVELOPER_CONTACT_*` and `DEVELOPER_*_URL` env vars) with social links and an inline contact form. If the API call fails, the UI falls back to a `mailto:` link.
+
 ## News Ingestion Pipeline
 
 Primary orchestration: `app/services/news_ingestion_service.py`
@@ -239,10 +308,12 @@ When topics are provided from UI/API, ingestion uses mapped RSS feeds and persis
   - `POST /api/v1/auth/login`
   - `POST /api/v1/auth/refresh`
   - `POST /api/v1/auth/logout`
+  - `POST /api/v1/auth/logout-all`
   - `POST /api/v1/auth/verify-email`
   - `POST /api/v1/auth/resend-verification`
   - `POST /api/v1/auth/password-reset-request`
   - `POST /api/v1/auth/password-reset`
+  - `POST /api/v1/auth/contact-developer`
 
 ### Authenticated examples
 
@@ -267,6 +338,10 @@ When topics are provided from UI/API, ingestion uses mapped RSS feeds and persis
   - `GET /api/v1/user/preferences`
   - `PUT /api/v1/user/preferences`
   - `GET /api/v1/user/reading-history`
+  - `POST /api/v1/user/export-data`
+  - `DELETE /api/v1/user/account`
+  - `POST /api/v1/auth/change-password`
+  - `GET /api/v1/auth/sessions`
 - Feedback/analytics/recommendations:
   - `/api/v1/feedback/*`
   - `/api/v1/analytics/*`
@@ -329,6 +404,19 @@ Verify topic keys in `RSS_TOPIC_FEED_URLS` and pass topic values consistently fr
 Current ingestion sanitizes to plain text. Re-ingest older records if legacy rows still contain markup.
 
 ## Deployment Notes
+
+### Docker Compose
+
+Docker Compose enforces that `DB_PASSWORD` and `REDIS_PASSWORD` are set via the `?required` interpolation syntax. Create a `.env` file with at minimum:
+
+```env
+DB_PASSWORD=<strong-password>
+REDIS_PASSWORD=<strong-password>
+SECRET_KEY=<min-32-chars>
+```
+
+Redis runs with `--requirepass` and the password is injected into all services that connect to it. The `keys/` volume is mounted read-only.
+
 
 For free-tier cloud deployment (OCI recommended for this architecture), run API + worker + beat + Redis + Postgres with process separation.
 
