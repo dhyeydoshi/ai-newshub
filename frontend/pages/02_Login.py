@@ -163,7 +163,7 @@ def _render_register_panel() -> None:
             password = st.text_input(
                 "Password",
                 type="password",
-                placeholder="Create a strong password: Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char",
+                placeholder="Min 8 chars, 1 upper, 1 lower, 1 number, 1 special char",
                 icon=":material/lock:",
             )
         with col2:

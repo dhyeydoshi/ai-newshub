@@ -11,14 +11,29 @@ services:
     mem_limit: 150m
     mem_reservation: 120m
     cpus: "0.30"
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
 
   redis:
-    command: redis-server --appendonly no --save "" --maxmemory 50mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --appendonly no
+      --save ""
+      --maxmemory 50mb
+      --maxmemory-policy allkeys-lru
+      --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}"
     mem_limit: 80m
     mem_reservation: 64m
     cpus: "0.10"
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      retries: 5
     security_opt:
       - no-new-privileges:true
 
@@ -35,15 +50,23 @@ services:
       DB_MAX_OVERFLOW: 0
       DB_POOL_TIMEOUT: 20
       DB_POOL_RECYCLE: 900
+      # Lower Argon2 memory to fit 120m container limit
+      ARGON2_MEMORY_COST: 16384
+      ARGON2_PARALLELISM: 1
       ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
       ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
       INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-300}
       INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-300}
       INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
-    mem_limit: 120m
+    mem_limit: 150m
     mem_reservation: 96m
     cpus: "0.30"
     pids_limit: 192
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   celery-worker:
     command: celery -A app.celery_config:celery_app worker --pool=solo --concurrency=1 --max-tasks-per-child=50 --without-gossip --without-mingle --without-heartbeat --loglevel=warning
@@ -56,6 +79,9 @@ services:
       DB_MAX_OVERFLOW: 0
       DB_POOL_TIMEOUT: 20
       DB_POOL_RECYCLE: 900
+      # Match API Argon2 settings for consistency
+      ARGON2_MEMORY_COST: 16384
+      ARGON2_PARALLELISM: 1
       ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
       ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
       INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}

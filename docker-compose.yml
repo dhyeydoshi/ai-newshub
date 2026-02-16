@@ -11,9 +11,9 @@
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-news_summarizer}"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
     networks:
       - news-network
 
@@ -25,9 +25,9 @@
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
     networks:
       - news-network
 
