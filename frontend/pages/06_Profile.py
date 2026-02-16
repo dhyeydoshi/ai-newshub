@@ -1,11 +1,13 @@
 import streamlit as st
 import plotly.graph_objects as go
+from html import escape
 from services.api_service import api_service
 from utils.auth import init_auth_state, require_auth, logout
 from utils.navigation import switch_page
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_error,
     show_success,
     show_loading,
@@ -22,6 +24,14 @@ init_auth_state()
 @require_auth
 def main() -> None:
     """User profile page"""
+    with st.sidebar:
+        username = st.session_state.get("username", "User")
+        st.markdown(f"### :material/person: {username}")
+        st.divider()
+        if st.button(":material/logout: Logout", use_container_width=True):
+            logout()
+        render_contact_developer_option()
+
     st.title(":material/person: My Profile")
     st.caption(f"Logged in as **{st.session_state.get('username', 'User')}**")
 
@@ -50,10 +60,11 @@ def main() -> None:
 
         with col1:
             initial = (profile.get("full_name") or profile.get("username") or "U")[0].upper()
+            safe_initial = escape(initial)
             st.markdown(
                 f"""
-            <div style='text-align: center; padding: 0; background: linear-gradient(135deg, #1f7a6a 0%, #145c50 100%); border-radius: 50%; width: 130px; height: 130px; margin: auto; display: flex; align-items: center; justify-content: center;'>
-                <span style='color: white; font-size: 3.5rem; font-family: Space Grotesk, sans-serif; font-weight: 700;'>{initial}</span>
+            <div style='text-align: center; padding: 0; background: linear-gradient(135deg, #006B5E 0%, #004D43 100%); border-radius: 50%; width: 130px; height: 130px; margin: auto; display: flex; align-items: center; justify-content: center;'>
+                <span style='color: white; font-size: 3.5rem; font-weight: 500;'>{safe_initial}</span>
             </div>
             """,
                 unsafe_allow_html=True,
@@ -76,14 +87,12 @@ def main() -> None:
                     "Email Address",
                     value=profile.get("email", ""),
                     disabled=True,
-                    help="Email cannot be changed",
                 )
 
                 username = st.text_input(
                     "Username",
                     value=profile.get("username", ""),
                     disabled=True,
-                    help="Username cannot be changed",
                 )
 
                 bio = st.text_area(
@@ -214,7 +223,7 @@ def main() -> None:
                     y=[5, 8, 6, 9, 7, 12, 10],
                     mode="lines+markers",
                     name="Articles Read",
-                    line=dict(color="#667eea", width=3),
+                    line=dict(color="#006B5E", width=3),
                     marker=dict(size=8),
                 )
             )

@@ -5,6 +5,7 @@ from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_article_card,
     show_error,
     show_loading,
@@ -60,6 +61,7 @@ def main() -> None:
         st.markdown(f":material/person: Logged in as **{st.session_state.get('username', 'User')}**")
         if st.button(":material/logout: Logout", use_container_width=True):
             logout()
+        render_contact_developer_option()
 
         st.divider()
         st.markdown("### :material/tune: Feed Mode")
@@ -150,7 +152,6 @@ def _render_topic_filter() -> None:
         ":material/label: Filter by Topics",
         AVAILABLE_TOPICS,
         default=st.session_state.selected_topics,
-        help="Filter articles by topics",
         key="topic_filter_inline",
     )
 

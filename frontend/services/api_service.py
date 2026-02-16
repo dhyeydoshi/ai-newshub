@@ -10,9 +10,21 @@ logger = logging.getLogger(__name__)
 class APIService:
     """Service for making API calls to the backend."""
 
+    _REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
+
     def __init__(self) -> None:
         self.base_url = config.API_ENDPOINT
-        self.session = requests.Session()
+
+    @staticmethod
+    def _get_session() -> requests.Session:
+        """Return a per-Streamlit-user requests.Session.
+
+        Stored in st.session_state so each browser session gets its own
+        cookie jar, preventing cross-user token leakage.
+        """
+        if "_http_session" not in st.session_state:
+            st.session_state["_http_session"] = requests.Session()
+        return st.session_state["_http_session"]
 
     # ── internal helpers ──────────────────────────────────────────────
 
@@ -27,7 +39,12 @@ class APIService:
                 headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
+    def _handle_response(
+        self,
+        response: requests.Response,
+        *,
+        logout_on_401: bool = True,
+    ) -> Dict[str, Any]:
         try:
             response.raise_for_status()
             try:
@@ -35,7 +52,7 @@ class APIService:
             except ValueError:
                 return {"success": True, "data": {"raw": response.text}}
         except requests.exceptions.HTTPError as exc:
-            if response.status_code == 401:
+            if response.status_code == 401 and logout_on_401:
                 self._clear_auth()
                 st.rerun()
             logger.error("HTTP Error: %s", exc)
@@ -54,7 +71,15 @@ class APIService:
             return {"success": False, "error": str(exc)}
 
     def _clear_auth(self) -> None:
-        for key in ["access_token", "refresh_token", "user_id", "username", "is_authenticated"]:
+        for key in [
+            "access_token",
+            "refresh_token",
+            "user_id",
+            "username",
+            "is_authenticated",
+            "integration_api_key_vault",
+            "integration_last_api_key",
+        ]:
             st.session_state.pop(key, None)
 
     def _request(
@@ -68,14 +93,15 @@ class APIService:
     ) -> Dict[str, Any]:
         """Generic request helper that wraps every API call."""
         try:
-            response = self.session.request(
+            response = self._get_session().request(
                 method,
                 f"{self.base_url}{path}",
                 json=json,
                 params=params,
                 headers=self._get_headers(include_auth=include_auth),
+                timeout=self._REQUEST_TIMEOUT,
             )
-            return self._handle_response(response)
+            return self._handle_response(response, logout_on_401=include_auth)
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
@@ -85,6 +111,46 @@ class APIService:
         return self._request(
             "POST", "/auth/register", include_auth=False,
             json={"email": email, "password": password, "username": username, "full_name": full_name},
+        )
+
+    def contact_developer(self, name: str, email: str, message: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/contact-developer",
+            include_auth=False,
+            json={"name": name, "email": email, "message": message},
+        )
+
+    def verify_email(self, token: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/verify-email",
+            include_auth=False,
+            json={"token": token},
+        )
+
+    def resend_verification(self, email: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/resend-verification",
+            include_auth=False,
+            json={"email": email},
+        )
+
+    def request_password_reset(self, email: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/password-reset-request",
+            include_auth=False,
+            json={"email": email},
+        )
+
+    def reset_password(self, token: str, new_password: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/password-reset",
+            include_auth=False,
+            json={"token": token, "new_password": new_password},
         )
 
     def login(self, email: str, password: str, remember_me: bool = False) -> Dict[str, Any]:
@@ -104,9 +170,10 @@ class APIService:
     def logout(self, all_devices: bool = False) -> Dict[str, Any]:
         endpoint = "/auth/logout-all" if all_devices else "/auth/logout"
         try:
-            response = self.session.post(
+            response = self._get_session().post(
                 f"{self.base_url}{endpoint}",
-                headers=self._get_headers(include_auth=all_devices),
+                headers=self._get_headers(include_auth=True),
+                timeout=self._REQUEST_TIMEOUT,
             )
             if response.ok:
                 try:
@@ -130,7 +197,7 @@ class APIService:
             return {"success": False, "error": str(exc)}
         finally:
             self._clear_auth()
-            self.session.cookies.clear()
+            self._get_session().cookies.clear()
 
     def refresh_token(self) -> Dict[str, Any]:
         result = self._request("POST", "/auth/refresh", include_auth=False)
@@ -141,7 +208,7 @@ class APIService:
 
     def auto_login(self) -> bool:
         try:
-            if not self.session.cookies.get("refresh_token"):
+            if not self._get_session().cookies.get("refresh_token"):
                 return False
             result = self.refresh_token()
             if result["success"]:
@@ -152,11 +219,11 @@ class APIService:
                     st.session_state.user_id = user.get("user_id")
                     st.session_state.username = user.get("username")
                 return True
-            self.session.cookies.clear()
+            self._get_session().cookies.clear()
             return False
         except Exception as exc:
             logger.error("Auto-login failed: %s", exc)
-            self.session.cookies.clear()
+            self._get_session().cookies.clear()
             return False
 
     # ── news ──────────────────────────────────────────────────────────

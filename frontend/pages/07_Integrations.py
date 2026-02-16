@@ -8,6 +8,7 @@ from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     apply_custom_css,
     init_page_config,
+    render_contact_developer_option,
     show_error,
     show_loading,
     show_success,
@@ -1011,6 +1012,7 @@ def main() -> None:
         st.divider()
         if st.button(":material/logout: Logout", use_container_width=True):
             logout()
+        render_contact_developer_option()
     
     st.title(":material/hub: Integrations")
     st.caption("Manage API keys, custom feeds, bundles, and webhooks.")

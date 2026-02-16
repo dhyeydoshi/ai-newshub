@@ -4,7 +4,7 @@
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       POSTGRES_DB: ${DB_NAME:-news_summarizer}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -20,11 +20,11 @@
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -44,12 +44,13 @@
       DEBUG: ${DEBUG:-false}
 
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-news_summarizer}
 
       REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
@@ -65,6 +66,33 @@
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
 
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://localhost:8000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
+
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
 
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
@@ -84,6 +112,7 @@
     volumes:
       - ./logs:/app/logs
       - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
       - ./keys:/app/keys:ro
     depends_on:
       postgres:
@@ -110,12 +139,13 @@
       DEBUG: ${DEBUG:-false}
 
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-news_summarizer}
 
       REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
@@ -130,6 +160,30 @@
       JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
 
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
       NEWSAPI_KEY: ${NEWSAPI_KEY:-}
       ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
       ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
@@ -144,6 +198,7 @@
     volumes:
       - ./logs:/app/logs
       - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
       - ./keys:/app/keys:ro
     depends_on:
       postgres:
@@ -168,12 +223,13 @@
       DEBUG: ${DEBUG:-false}
 
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-news_summarizer}
 
       REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
@@ -188,6 +244,30 @@
       JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
 
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
       NEWSAPI_KEY: ${NEWSAPI_KEY:-}
       ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
       ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
@@ -202,6 +282,7 @@
     volumes:
       - ./logs:/app/logs
       - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
       - ./keys:/app/keys:ro
     depends_on:
       postgres:

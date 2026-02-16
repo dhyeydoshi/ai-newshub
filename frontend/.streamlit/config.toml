@@ -1,0 +1,58 @@
+[theme]
+base = "light"
+font = "Roboto:https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap, sans-serif"
+codeFont = "'Roboto Mono':https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap, monospace"
+primaryColor = "#006B5E"
+backgroundColor = "#FBFDF9"
+secondaryBackgroundColor = "#E8ECE9"
+textColor = "#191C1B"
+borderColor = "#BFC9C3"
+linkColor = "#006B5E"
+baseRadius = "0.75rem"
+buttonRadius = "full"
+showWidgetBorder = false
+showSidebarBorder = true
+linkUnderline = false
+greenColor = "#006D3B"
+blueColor = "#0061A4"
+redColor = "#BA1A1A"
+orangeColor = "#8B5000"
+violetColor = "#6750A4"
+
+[theme.sidebar]
+backgroundColor = "#F0F4F1"
+secondaryBackgroundColor = "#FBFDF9"
+
+[theme.dark]
+primaryColor = "#4FDBC0"
+backgroundColor = "#191C1B"
+secondaryBackgroundColor = "#1D201F"
+textColor = "#E1E3DF"
+borderColor = "#414944"
+linkColor = "#4FDBC0"
+greenColor = "#4FDBC0"
+blueColor = "#9ECAFF"
+redColor = "#FFB4AB"
+orangeColor = "#FFB871"
+violetColor = "#D0BCFF"
+
+[theme.dark.sidebar]
+backgroundColor = "#1D201F"
+secondaryBackgroundColor = "#191C1B"
+
+[server]
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[client]
+showErrorDetails = "none"
+toolbarMode = "minimal"
+showSidebarNavigation = true
+
+[browser]
+gatherUsageStats = false

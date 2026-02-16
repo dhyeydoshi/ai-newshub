@@ -96,14 +96,27 @@ async def check_integration_rate_limit(*, identifier: str, limit_per_hour: int) 
 
 
 def _get_identifier(request: Request) -> str:
-    """Extract rate limit identifier from request"""
+    """Extract rate limit identifier from request.
+
+    Uses the authenticated user ID when available, otherwise falls back
+    to the client IP.  X-Forwarded-For is only trusted when
+    TRUSTED_PROXY_COUNT is > 0 (i.e. the app sits behind a known reverse
+    proxy).  When set, we take the Nth-from-last entry where N equals the
+    trusted proxy count, which is the first untrusted (i.e. real-client) IP.
+    """
+    from config import settings
+
     # Try to get user ID from JWT token (set by auth middleware)
     if hasattr(request.state, "user_id") and request.state.user_id:
         return f"user:{request.state.user_id}"
 
+    trusted_proxy_count: int = getattr(settings, "TRUSTED_PROXY_COUNT", 0)
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
+    if forwarded and trusted_proxy_count > 0:
+        parts = [p.strip() for p in forwarded.split(",")]
+        # Pick the entry just before the trusted proxies
+        index = max(len(parts) - trusted_proxy_count, 0)
+        ip = parts[index]
     else:
         ip = request.client.host if request.client else "unknown"
 

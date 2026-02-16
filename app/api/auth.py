@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from typing import List
+from html import escape
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from app.schemas.auth import (
     PasswordChange,
     EmailVerification,
     ResendVerification,
+    DeveloperContactRequest,
     UserResponse,
     LoginResponse,
     TokenResponse,
@@ -130,27 +132,90 @@ async def resend_verification(
         from datetime import datetime, timezone, timedelta
         from app.services.email_service import email_service
 
+        user_email = user.email
+        username = user.username
+
         # Generate new token
         verification_token = pwd_hasher.generate_secure_token(32)
-        user.verification_token = verification_token
+        user.verification_token = auth_service.hash_one_time_token(verification_token)
         user.verification_token_expires = datetime.now(timezone.utc) + timedelta(
             hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS
         )
 
-        await db.commit()
-
         # Send email
-        await email_service.send_verification_email(
-            user.email,
-            user.username,
+        email_sent = await email_service.send_verification_email(
+            user_email,
+            username,
             verification_token
         )
+        if email_sent:
+            await db.commit()
+        else:
+            await db.rollback()
+            logger.error("Verification email could not be sent for %s; token update rolled back", user_email)
 
     # Always return success to prevent user enumeration
     return MessageResponse(
         message="If the email exists and is not verified, a verification link has been sent.",
         success=True
     )
+
+
+@router.post("/contact-developer", response_model=MessageResponse)
+async def contact_developer(
+    payload: DeveloperContactRequest,
+    request: Request,
+    _rate_limit=Depends(RateLimitPresets.strict),
+):
+    if not settings.DEVELOPER_CONTACT_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Developer contact is not configured",
+        )
+
+    from app.services.email_service import email_service
+
+    forwarded = request.headers.get("x-forwarded-for", "")
+    requester_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    user_agent = request.headers.get("user-agent", "unknown")
+
+    safe_name = escape(payload.name)
+    safe_email = escape(str(payload.email))
+    safe_message_html = escape(payload.message).replace("\n", "<br/>")
+    safe_message_text = payload.message.strip()
+
+    subject = f"{settings.APP_NAME} | Let's connect from {payload.name}"
+    html_content = (
+        "<h3>New developer contact request</h3>"
+        f"<p><strong>Name:</strong> {safe_name}</p>"
+        f"<p><strong>Email:</strong> {safe_email}</p>"
+        f"<p><strong>Message:</strong><br/>{safe_message_html}</p>"
+        "<hr/>"
+        f"<p><strong>Requester IP:</strong> {escape(requester_ip)}</p>"
+        f"<p><strong>User-Agent:</strong> {escape(user_agent)}</p>"
+    )
+    text_content = (
+        "New developer contact request\n"
+        f"Name: {payload.name}\n"
+        f"Email: {payload.email}\n"
+        f"Message:\n{safe_message_text}\n\n"
+        f"Requester IP: {requester_ip}\n"
+        f"User-Agent: {user_agent}"
+    )
+
+    sent = await email_service.send_email(
+        to_email=settings.DEVELOPER_CONTACT_EMAIL,
+        subject=subject,
+        html_content=html_content,
+        text_content=text_content,
+    )
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to deliver message right now",
+        )
+
+    return MessageResponse(message="Message sent to developer.", success=True)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -237,7 +302,9 @@ async def refresh_token(
 async def logout(
     response: Response,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict)
 ):
     # Get refresh token from cookie
     refresh_token = request.cookies.get("refresh_token")
@@ -255,6 +322,7 @@ async def logout(
                     .where(
                         and_(
                             UserSession.session_id == session_id,
+                            UserSession.user_id == user_id,
                             UserSession.is_active == True
                         )
                     )
@@ -279,7 +347,8 @@ async def logout(
 async def logout_all(
     response: Response,
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _rate_limit=Depends(RateLimitPresets.strict),
 ):
     await db.execute(
         update(UserSession)

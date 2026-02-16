@@ -5,6 +5,7 @@ from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_error,
     show_success,
     show_loading,
@@ -28,6 +29,7 @@ def main() -> None:
         st.divider()
         if st.button(":material/logout: Logout", use_container_width=True):
             logout()
+        render_contact_developer_option()
     
     st.title(":material/tune: Preferences")
     st.caption("Customize your news feed and recommendation settings")
@@ -130,7 +132,7 @@ def main() -> None:
                     go.Bar(
                         x=list(topics),
                         y=list(scores),
-                        marker_color="lightblue",
+                        marker_color="#006B5E",
                         text=[f"{s:.2%}" for s in scores],
                         textposition="auto",
                     )

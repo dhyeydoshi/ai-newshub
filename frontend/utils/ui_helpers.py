@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import List
+from urllib.parse import quote
+import re
 import streamlit as st
 
+from frontend_config import config
 from utils.navigation import switch_page
 
 
@@ -120,121 +123,63 @@ def init_page_config(page_title: str, page_icon: str = "", layout: str = "wide")
         layout=layout,
         initial_sidebar_state="expanded",
     )
+    st.logo(":material/newspaper:")
 
 
 def apply_custom_css() -> None:
-    """Apply custom CSS styling"""
-    # Selectors below target Streamlit's public data-testid attributes and
-    # stable CSS class names (stButton, stTextInput, stTabs, etc.).  These have
-    # been stable across Streamlit 1.30 – 1.50.  If a future Streamlit release
-    # renames them, the worst-case outcome is that custom colours / radii fall
-    # back to Streamlit's defaults — no functionality is lost.
+    """Apply MD3-aligned CSS for custom HTML components.
+
+    Widget styling (buttons, inputs, tabs, sidebar, etc.) is handled entirely
+    by Streamlit's native theme in .streamlit/config.toml (Streamlit ≥ 1.54).
+    This function only provides styles for custom HTML rendered via
+    st.markdown(unsafe_allow_html=True): hero, feature-cards, workflow steps,
+    and the footer.
+    """
     st.markdown(
         """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;600;700&display=swap');
-
+    /* ── MD3 Design Tokens (for custom HTML components only) ──
+       Widget/component theming lives in .streamlit/config.toml.
+       These CSS variables mirror the config values so custom HTML
+       stays visually consistent. */
     :root {
-        --bg-1: #f6f3ee;
-        --bg-2: #eef4ff;
-        --ink: #1f2933;
-        --muted: #5b6470;
-        --accent: #1f7a6a;
-        --accent-light: rgba(31, 122, 106, 0.08);
-        --accent-2: #f08c42;
-        --card: #ffffff;
-        --border: #e6e1d7;
-        --shadow: 0 18px 40px rgba(16, 24, 40, 0.08);
-        --shadow-sm: 0 4px 12px rgba(16, 24, 40, 0.05);
-        --radius: 16px;
-        --radius-sm: 10px;
+        --md-primary: #006B5E;
+        --md-on-primary: #ffffff;
+        --md-on-surface: #191C1B;
+        --md-on-surface-variant: #3F4945;
+        --md-outline-variant: #BFC9C3;
+        --md-surface: #FBFDF9;
+        --md-surface-container-low: #F0F4F1;
+        --md-surface-container: #E8ECE9;
+        --md-shape-medium: 0.75rem;
+        --md-shape-large: 1rem;
+        --md-shape-xl: 1.75rem;
+        /* MD3 Elevation tokens */
+        --md-elevation-1: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15);
+        --md-elevation-2: 0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15);
     }
 
-    /* ── Base ── */
-    .stApp {
-        background: radial-gradient(circle at top left, #ffffff 0%, var(--bg-2) 35%, var(--bg-1) 100%);
-        color: var(--ink);
-        font-family: 'IBM Plex Sans', system-ui, sans-serif;
-    }
-
-    h1, h2, h3, h4 {
-        font-family: 'Space Grotesk', system-ui, sans-serif;
-        letter-spacing: -0.02em;
-        color: var(--ink);
-    }
-
+    /* ── Layout ── */
     .block-container {
         padding-top: 2rem;
         max-width: 1200px;
     }
 
-    /* ── Buttons ── */
-    .stButton > button {
-        border-radius: 999px;
-        padding: 0.55rem 1.2rem;
-        border: 1px solid transparent;
-        background: var(--accent);
-        color: #ffffff;
-        font-weight: 600;
-        font-size: 0.88rem;
-        transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-    }
-
+    /* ── MD3 State Layer: subtle hover lift for buttons ── */
     .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(31, 122, 106, 0.22);
+        transform: translateY(-1px);
     }
-
     .stButton > button:active {
         transform: translateY(0);
     }
 
-    .stButton > button:focus {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(31, 122, 106, 0.25);
-    }
-
-    /* ── Inputs ── */
-    .stTextInput > div > div > input,
-    .stSelectbox > div > div > select,
-    .stTextArea textarea {
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        padding: 0.6rem 0.8rem;
-        transition: border 0.15s ease, box-shadow 0.15s ease;
-    }
-
-    .stTextInput > div > div > input:focus,
-    .stTextArea textarea:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-light);
-    }
-
-    /* ── Sidebar (data-testid is Streamlit's public API for theming) ── */
-    [data-testid="stSidebar"] {
-        background: #fbfaf7;
-        border-right: 1px solid var(--border);
-    }
-
-    [data-testid="stSidebar"] .stButton > button {
-        font-size: 0.82rem;
-        padding: 0.45rem 0.9rem;
-    }
-
-    /* ── Dividers ── */
-    hr {
-        margin: 1.5rem 0;
-        border: none;
-        border-top: 1px solid var(--border);
-    }
-
-    /* ── Hero ── */
+    /* ── Hero (Home page) ── */
     .hero {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 24px;
+        background: var(--md-surface);
+        border: 1px solid var(--md-outline-variant);
+        border-radius: var(--md-shape-xl);
         padding: 3rem;
-        box-shadow: var(--shadow);
+        box-shadow: var(--md-elevation-2);
         margin-bottom: 2rem;
         text-align: center;
     }
@@ -248,75 +193,79 @@ def apply_custom_css() -> None:
         display: inline-block;
         padding: 0.35rem 0.9rem;
         border-radius: 999px;
-        background: var(--accent-light);
-        color: var(--accent);
-        font-weight: 600;
+        background: rgba(0, 107, 94, 0.08);
+        color: var(--md-primary);
+        font-weight: 500;
         font-size: 0.85rem;
         margin-bottom: 1rem;
     }
+    .hero-badge-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0, 107, 94, 0.35);
+        font-size: 0.68rem;
+        margin-right: 0.45rem;
+        vertical-align: middle;
+        letter-spacing: 0.02em;
+    }
 
     .hero-subtitle {
-        color: var(--muted);
+        color: var(--md-on-surface-variant);
         font-size: 1.1rem;
         line-height: 1.6;
         max-width: 540px;
         margin: 0 auto;
     }
 
-    /* ── Feature cards ── */
+    /* ── Feature cards (Home page) ── */
     .feature-card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 1.6rem;
-        box-shadow: var(--shadow-sm);
+        background: var(--md-surface);
+        border: 1px solid var(--md-outline-variant);
+        border-radius: var(--md-shape-large);
+        padding: 1.5rem;
+        box-shadow: var(--md-elevation-1);
         height: 100%;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+                    box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
 
     .feature-card:hover {
         transform: translateY(-4px);
-        box-shadow: var(--shadow);
+        box-shadow: var(--md-elevation-2);
     }
 
     .feature-card .card-icon {
-        font-size: 2rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 2.6rem;
+        height: 2.1rem;
+        border-radius: 999px;
+        padding: 0 0.75rem;
+        background: rgba(0, 107, 94, 0.1);
+        border: 1px solid rgba(0, 107, 94, 0.2);
+        color: var(--md-primary);
+        font-size: 0.75rem;
+        font-weight: 600;
         margin-bottom: 0.6rem;
+        letter-spacing: 0.04em;
     }
 
     .feature-card h4 {
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.3rem;
     }
 
     .subtle {
-        color: var(--muted);
+        color: var(--md-on-surface-variant);
         font-size: 0.92rem;
         line-height: 1.5;
     }
 
-    /* ── Article card ── */
-    .article-card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 1.4rem 1.6rem;
-        margin-bottom: 0.8rem;
-        box-shadow: var(--shadow-sm);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .article-card:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--shadow);
-    }
-
-    .article-card h3 {
-        font-size: 1.15rem;
-        margin-bottom: 0.3rem;
-        line-height: 1.35;
-    }
-
-    /* ── Workflow steps ── */
+    /* ── Workflow steps (Home page) ── */
     .workflow-step {
         display: flex;
         align-items: flex-start;
@@ -329,14 +278,13 @@ def apply_custom_css() -> None:
         width: 36px;
         height: 36px;
         border-radius: 50%;
-        background: var(--accent);
-        color: #fff;
+        background: var(--md-primary);
+        color: var(--md-on-primary);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: 700;
+        font-weight: 500;
         font-size: 0.95rem;
-        font-family: 'Space Grotesk', system-ui, sans-serif;
     }
 
     .step-content h4 {
@@ -346,60 +294,20 @@ def apply_custom_css() -> None:
 
     .step-content p {
         margin: 0;
-        color: var(--muted);
+        color: var(--md-on-surface-variant);
         font-size: 0.9rem;
-    }
-
-    /* ── Metrics (data-testid="stMetric" is stable since 1.22) ── */
-    [data-testid="stMetric"] {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 0.8rem 1rem;
-    }
-
-    /* ── Tabs (data-baseweb is BaseWeb UI library used by Streamlit) ── */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.2rem;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-        font-weight: 500;
-        padding: 0.55rem 1.1rem;
-    }
-
-    /* ── Expander ── */
-    details summary {
-        font-weight: 600;
-        font-size: 0.95rem;
-    }
-
-    /* ── Related article card ── */
-    .related-card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 1rem 1.2rem;
-        height: 100%;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .related-card:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-sm);
     }
 
     /* ── Footer ── */
     .app-footer {
         text-align: center;
         padding: 2rem 0;
-        color: var(--muted);
+        color: var(--md-on-surface-variant);
         font-size: 0.85rem;
     }
 
     .app-footer a {
-        color: var(--accent);
+        color: var(--md-primary);
         text-decoration: none;
     }
     </style>
@@ -416,3 +324,83 @@ def show_error(message: str) -> None:
 def show_success(message: str) -> None:
     """Display success message"""
     st.success(message)
+
+
+def render_contact_developer_option() -> None:
+    """Render a sidebar action to contact the developer."""
+    st.divider()
+    st.markdown("### :material/person: Contact")
+
+    if config.DEVELOPER_CONTACT_URL:
+        st.link_button(
+            ":material/language: Website",
+            config.DEVELOPER_CONTACT_URL,
+            use_container_width=True,
+        )
+
+    social_links = [
+        (":material/code: GitHub", config.DEVELOPER_GITHUB_URL),
+        (":material/work: LinkedIn", config.DEVELOPER_LINKEDIN_URL),
+        (":material/campaign: Twitter/X", config.DEVELOPER_TWITTER_URL),
+    ]
+    for label, target in social_links:
+        if target:
+            st.link_button(label, target, use_container_width=True)
+
+    with st.expander("Let's connect", expanded=False):
+        name = st.text_input("Name", key="dev_contact_name")
+        email = st.text_input("Email", key="dev_contact_email")
+        message = st.text_area("Message", key="dev_contact_message", height=110)
+
+        send_requested = st.button(
+            ":material/send: Send Message",
+            key="dev_contact_submit",
+            use_container_width=True,
+        )
+        if send_requested:
+            if not name.strip() or not email.strip() or not message.strip():
+                st.error("Please fill name, email, and message.")
+            elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()):
+                st.error("Please enter a valid email address.")
+            else:
+                from services.api_service import api_service
+
+                with st.spinner("Sending message..."):
+                    result = api_service.contact_developer(
+                        name=name.strip(),
+                        email=email.strip(),
+                        message=message.strip(),
+                    )
+
+                if result.get("success"):
+                    st.success("Message sent to developer.")
+                    st.session_state.pop("dev_contact_name", None)
+                    st.session_state.pop("dev_contact_email", None)
+                    st.session_state.pop("dev_contact_message", None)
+                    st.rerun()
+                else:
+                    st.error(result.get("error", "Failed to send message."))
+                    if config.DEVELOPER_CONTACT_EMAIL:
+                        subject = quote(f"Let's connect - {name.strip()}")
+                        body = quote(
+                            f"Name: {name.strip()}\n"
+                            f"Email: {email.strip()}\n\n"
+                            f"Message:\n{message.strip()}\n"
+                        )
+                        mailto_link = f"mailto:{config.DEVELOPER_CONTACT_EMAIL}?subject={subject}&body={body}"
+                        st.link_button(
+                            ":material/open_in_new: Open Email Client (Fallback)",
+                            mailto_link,
+                            use_container_width=True,
+                        )
+
+    if not any(
+        [
+            config.DEVELOPER_CONTACT_URL,
+            config.DEVELOPER_GITHUB_URL,
+            config.DEVELOPER_LINKEDIN_URL,
+            config.DEVELOPER_TWITTER_URL,
+            config.DEVELOPER_CONTACT_EMAIL,
+        ]
+    ):
+        st.caption("Developer links are not configured.")

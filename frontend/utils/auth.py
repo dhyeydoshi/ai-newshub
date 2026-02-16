@@ -23,6 +23,10 @@ def init_auth_state() -> None:
     st.session_state.setdefault("user_id", None)
     st.session_state.setdefault("username", None)
 
+    if not st.session_state.get("is_authenticated", False):
+        st.session_state.pop("integration_api_key_vault", None)
+        st.session_state.pop("integration_last_api_key", None)
+
 
 def is_authenticated() -> bool:
     """Check if user is authenticated"""

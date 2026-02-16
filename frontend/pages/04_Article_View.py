@@ -7,6 +7,7 @@ from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
     format_date,
+    render_contact_developer_option,
     show_error,
     show_loading,
     show_success,
@@ -34,6 +35,7 @@ def main() -> None:
         st.divider()
         if st.button(":material/logout: Logout", use_container_width=True):
             logout()
+        render_contact_developer_option()
 
     article_id = st.session_state.get("selected_article")
 
