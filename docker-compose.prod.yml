@@ -1,7 +1,7 @@
 ﻿services:
   api:
     ports:
-      - "8000:8000"  # Bind to all interfaces for public access
+      - "127.0.0.1:8000:8000"  # Localhost only — ngrok or Nginx handles public access
     environment:
       ENVIRONMENT: production
       DEBUG: "false"

@@ -248,7 +248,7 @@ async def login(
         access_token=access_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-        refresh_token=None  # In cookie, not in response
+        refresh_token=refresh_token  # Returned in body for two-hop frontends (e.g. Streamlit)
     )
 
 
@@ -294,7 +294,7 @@ async def refresh_token(
         access_token=new_access_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-        refresh_token=None
+        refresh_token=new_refresh_token  # Returned in body for two-hop frontends
     )
 
 

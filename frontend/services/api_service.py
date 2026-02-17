@@ -3,6 +3,7 @@ import logging
 import requests
 import streamlit as st
 from frontend_config import config
+from utils.cookies import get_browser_cookie, set_browser_cookie, delete_browser_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,12 @@ class APIService:
             st.session_state.user_id = data.get("user", {}).get("user_id")
             st.session_state.username = data.get("user", {}).get("username")
             st.session_state.is_authenticated = True
+
+            # Persist refresh token in a browser cookie so it survives page refresh
+            rt = data.get("refresh_token")
+            if rt:
+                max_age = config.SESSION_MAX_AGE
+                set_browser_cookie(rt, max_age=max_age)
         return result
 
     def logout(self, all_devices: bool = False) -> Dict[str, Any]:
@@ -198,28 +205,55 @@ class APIService:
         finally:
             self._clear_auth()
             self._get_session().cookies.clear()
+            delete_browser_cookie()
 
-    def refresh_token(self) -> Dict[str, Any]:
-        result = self._request("POST", "/auth/refresh", include_auth=False)
+    def refresh_token(self, token: Optional[str] = None) -> Dict[str, Any]:
+        payload = {"refresh_token": token} if token else None
+        result = self._request(
+            "POST", "/auth/refresh", include_auth=False, json=payload,
+        )
         if result["success"]:
             st.session_state.access_token = result["data"].get("access_token")
             st.session_state.is_authenticated = True
+
+            # Rotate the browser cookie to the new refresh token
+            new_rt = result["data"].get("refresh_token")
+            if new_rt:
+                st.session_state.refresh_token = new_rt
+                set_browser_cookie(new_rt, max_age=config.SESSION_MAX_AGE)
         return result
 
     def auto_login(self) -> bool:
         try:
-            if not self._get_session().cookies.get("refresh_token"):
-                return False
-            result = self.refresh_token()
-            if result["success"]:
-                st.session_state.is_authenticated = True
-                profile_result = self.get_profile()
-                if profile_result["success"]:
-                    user = profile_result["data"]
-                    st.session_state.user_id = user.get("user_id")
-                    st.session_state.username = user.get("username")
-                return True
-            self._get_session().cookies.clear()
+            # 1. Try browser cookie first (page-refresh recovery path)
+            browser_rt = get_browser_cookie()
+            if browser_rt:
+                result = self.refresh_token(token=browser_rt)
+                if result["success"]:
+                    st.session_state.is_authenticated = True
+                    profile_result = self.get_profile()
+                    if profile_result["success"]:
+                        user = profile_result["data"]
+                        st.session_state.user_id = user.get("user_id")
+                        st.session_state.username = user.get("username")
+                    return True
+                # Browser cookie was invalid/expired — remove it
+                delete_browser_cookie()
+
+            # 2. Fall back to requests.Session cookie jar
+            session_rt = self._get_session().cookies.get("refresh_token")
+            if session_rt:
+                result = self.refresh_token(token=session_rt)
+                if result["success"]:
+                    st.session_state.is_authenticated = True
+                    profile_result = self.get_profile()
+                    if profile_result["success"]:
+                        user = profile_result["data"]
+                        st.session_state.user_id = user.get("user_id")
+                        st.session_state.username = user.get("username")
+                    return True
+                self._get_session().cookies.clear()
+
             return False
         except Exception as exc:
             logger.error("Auto-login failed: %s", exc)

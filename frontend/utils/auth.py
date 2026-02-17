@@ -3,6 +3,7 @@
 import streamlit as st
 
 from services.api_service import api_service
+from utils.cookies import delete_browser_cookie
 from utils.navigation import switch_page as _switch_page
 
 
@@ -68,6 +69,9 @@ def logout(all_devices: bool = False) -> None:
 
     if all_devices and not result.get("success", False):
         warning_message = result.get("error", "Failed to revoke all sessions on the server.")
+
+    # Remove the browser cookie holding the refresh token
+    delete_browser_cookie()
 
     st.session_state.clear()
     if warning_message:

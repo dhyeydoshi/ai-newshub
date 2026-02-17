@@ -356,6 +356,26 @@
     profiles:
       - with-monitoring
 
+  ngrok:
+    image: ngrok/ngrok:alpine
+    restart: unless-stopped
+    command:
+      - "http"
+      - "api:8000"
+      - "--log=stdout"
+      - "--log-level=info"
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?NGROK_AUTHTOKEN must be set}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+    ports:
+      - "127.0.0.1:4040:4040"  
+    profiles:
+      - with-ngrok
+
 networks:
   news-network:
     driver: bridge

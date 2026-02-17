@@ -33,8 +33,8 @@ class Config:
             UserWarning,
         )
 
-    SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "streamlit_session")
-    SESSION_MAX_AGE: int = int(os.getenv("SESSION_MAX_AGE", "3600"))
+    SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "news_refresh_token")
+    SESSION_MAX_AGE: int = int(os.getenv("SESSION_MAX_AGE", "86400"))  # 24 hours
 
     # Features
     ENABLE_ANALYTICS: bool = os.getenv("ENABLE_ANALYTICS", "true").lower() == "true"

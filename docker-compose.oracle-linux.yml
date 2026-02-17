@@ -116,3 +116,9 @@ services:
     mem_reservation: 80m
     cpus: "0.10"
     pids_limit: 160
+
+  ngrok:
+    mem_limit: 50m
+    mem_reservation: 32m
+    cpus: "0.05"
+    pids_limit: 64
