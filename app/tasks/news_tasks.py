@@ -39,7 +39,7 @@ async def _async_fetch_and_save_news(
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.services.news_ingestion_service import news_ingestion_service
-        from app.core.database import AsyncSessionLocal
+        from app.core.database import create_task_session
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
@@ -74,8 +74,8 @@ async def _async_fetch_and_save_news(
                 cache_ttl=settings.NEWS_CACHE_TTL
             )
 
-            # Get database session
-            async with AsyncSessionLocal() as db:
+            # Get database session (task-local engine to avoid cross-loop issues)
+            async with create_task_session() as db:
                 total_saved = 0
                 total_duplicates = 0
                 total_errors = 0
@@ -173,11 +173,10 @@ def fetch_rss_feeds(self, feed_urls: Optional[List[str]] = None):
 
 async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
     try:
-        # Import here to avoid circular imports
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.services.news_ingestion_service import news_ingestion_service
-        from app.core.database import AsyncSessionLocal
+        from app.core.database import create_task_session
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
@@ -223,7 +222,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
 
             if articles:
                 # Save to database
-                async with AsyncSessionLocal() as db:
+                async with create_task_session() as db:
                     stats = await article_persistence_service.save_articles(
                         articles=articles,
                         db=db,
@@ -284,14 +283,14 @@ def cleanup_old_articles(self, days_old: int = 90):
 async def _async_cleanup_old_articles(days_old: int = 90):
     try:
         from app.models.article import Article
-        from app.core.database import AsyncSessionLocal
+        from app.core.database import create_task_session
         from sqlalchemy import update
 
         logger.info(f"Celery Task: Cleaning up articles older than {days_old} days...")
 
         threshold_date = datetime.now(timezone.utc) - timedelta(days=days_old)
 
-        async with AsyncSessionLocal() as db:
+        async with create_task_session() as db:
             # Deactivate old articles
             result = await db.execute(
                 update(Article)
@@ -339,7 +338,7 @@ async def _async_fetch_news_manual(
         from app.services.news_aggregator import NewsAggregatorService
         from app.services.article_persistence import article_persistence_service
         from app.services.news_ingestion_service import news_ingestion_service
-        from app.core.database import AsyncSessionLocal
+        from app.core.database import create_task_session
         from app.dependencies.cache import invalidate_article_cache
         from app.core.cache import init_cache_manager
         import redis.asyncio as aioredis
@@ -385,7 +384,7 @@ async def _async_fetch_news_manual(
             )
 
             if prepared_articles:
-                async with AsyncSessionLocal() as db:
+                async with create_task_session() as db:
                     stats = await article_persistence_service.save_articles(
                         articles=prepared_articles,
                         db=db,

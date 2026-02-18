@@ -1,4 +1,5 @@
 from typing import AsyncGenerator
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
@@ -102,6 +103,28 @@ async def has_alembic_version_table() -> bool:
 async def close_db():
     await engine.dispose()
     logger.info("Database connections closed")
+
+
+@asynccontextmanager
+async def create_task_session():
+    task_engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DEBUG,
+        future=True,
+        poolclass=NullPool,
+    )
+    factory = async_sessionmaker(
+        task_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    try:
+        async with factory() as session:
+            yield session
+    finally:
+        await task_engine.dispose()
 
 
 # Synchronous session for non-async code (e.g., Alembic migrations)

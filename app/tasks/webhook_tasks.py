@@ -80,12 +80,12 @@ async def _async_plan_webhook_batches() -> Dict[str, int]:
         logger.info("Skipping webhook planner run because another planner instance holds the lock")
         return {"queued_jobs": 0, "due_webhooks": 0}
 
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import create_task_session
 
     queued_jobs = 0
     due_count = 0
     try:
-        async with AsyncSessionLocal() as db:
+        async with create_task_session() as db:
             due_webhooks = await delivery_planner_service.get_due_webhooks(db=db)
             due_count = len(due_webhooks)
 
@@ -133,9 +133,9 @@ async def _async_deliver_webhook_batch(job_id: str) -> Dict[str, str]:
     if not settings.ENABLE_INTEGRATION_API or not settings.ENABLE_INTEGRATION_DELIVERY:
         return {"status": "skipped"}
 
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import create_task_session
 
-    async with AsyncSessionLocal() as db:
+    async with create_task_session() as db:
         try:
             job_uuid = UUID(job_id)
         except ValueError:
@@ -234,9 +234,9 @@ async def _async_flush_api_key_usage() -> Dict[str, int]:
     if not settings.ENABLE_INTEGRATION_API:
         return {"keys_processed": 0, "total_increment": 0}
 
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import create_task_session
 
-    async with AsyncSessionLocal() as db:
+    async with create_task_session() as db:
         result = await api_key_service.flush_usage_to_db(db=db)
         return result
 
@@ -255,9 +255,9 @@ async def _async_cleanup_integration_delivery_history() -> Dict[str, int]:
     if not settings.ENABLE_INTEGRATION_API:
         return {"deleted_jobs": 0, "retention_days": int(settings.INTEGRATION_DELIVERY_RETENTION_DAYS)}
 
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import create_task_session
 
-    async with AsyncSessionLocal() as db:
+    async with create_task_session() as db:
         result = await delivery_planner_service.cleanup_delivery_history(
             db=db,
             retention_days=settings.INTEGRATION_DELIVERY_RETENTION_DAYS,
