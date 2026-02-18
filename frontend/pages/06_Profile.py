@@ -1,18 +1,13 @@
-﻿import sys
-from pathlib import Path
-
-# Add parent directory to Python path for imports
-frontend_dir = Path(__file__).parent.parent
-if str(frontend_dir) not in sys.path:
-    sys.path.insert(0, str(frontend_dir))
-
 import streamlit as st
 import plotly.graph_objects as go
+from html import escape
 from services.api_service import api_service
 from utils.auth import init_auth_state, require_auth, logout
+from utils.navigation import switch_page
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_error,
     show_success,
     show_loading,
@@ -21,7 +16,7 @@ from utils.ui_helpers import (
 )
 
 # Initialize
-init_page_config("Profile | News Summarizer", "")
+init_page_config("Profile | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -29,7 +24,15 @@ init_auth_state()
 @require_auth
 def main() -> None:
     """User profile page"""
-    st.title("My Profile")
+    with st.sidebar:
+        username = st.session_state.get("username", "User")
+        st.markdown(f"### :material/person: {username}")
+        st.divider()
+        if st.button(":material/logout: Logout", use_container_width=True):
+            logout()
+        render_contact_developer_option()
+
+    st.title(":material/person: My Profile")
     st.caption(f"Logged in as **{st.session_state.get('username', 'User')}**")
 
     st.divider()
@@ -44,22 +47,24 @@ def main() -> None:
     profile = result["data"]
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "Profile Info",
-        "Reading History",
-        "Analytics",
-        "Account",
+        ":material/badge: Profile Info",
+        ":material/history: Reading History",
+        ":material/insights: Analytics",
+        ":material/shield: Account",
     ])
 
     with tab1:
-        st.markdown("### Personal Information")
+        st.markdown("### :material/badge: Personal Information")
 
         col1, col2 = st.columns([1, 2])
 
         with col1:
+            initial = (profile.get("full_name") or profile.get("username") or "U")[0].upper()
+            safe_initial = escape(initial)
             st.markdown(
-                """
-            <div style='text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; width: 150px; height: 150px; margin: auto;'>
-                <h1 style='color: white; margin-top: 40px; font-size: 4rem;'></h1>
+                f"""
+            <div style='text-align: center; padding: 0; background: linear-gradient(135deg, #006B5E 0%, #004D43 100%); border-radius: 50%; width: 130px; height: 130px; margin: auto; display: flex; align-items: center; justify-content: center;'>
+                <span style='color: white; font-size: 3.5rem; font-weight: 500;'>{safe_initial}</span>
             </div>
             """,
                 unsafe_allow_html=True,
@@ -82,14 +87,12 @@ def main() -> None:
                     "Email Address",
                     value=profile.get("email", ""),
                     disabled=True,
-                    help="Email cannot be changed",
                 )
 
                 username = st.text_input(
                     "Username",
                     value=profile.get("username", ""),
                     disabled=True,
-                    help="Username cannot be changed",
                 )
 
                 bio = st.text_area(
@@ -124,7 +127,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Account Statistics")
+        st.markdown("### :material/bar_chart: Account Statistics")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -151,7 +154,7 @@ def main() -> None:
                 st.metric("Member Since", format_date(member_since))
 
     with tab2:
-        st.markdown("### Your Reading History")
+        st.markdown("### :material/history: Your Reading History")
         st.caption("Articles you've read recently")
 
         with show_loading("Loading history..."):
@@ -194,7 +197,7 @@ def main() -> None:
 
                         if st.button("Read Again", key=f"reread_{idx}"):
                             st.session_state.selected_article = item.get("article_id")
-                            st.switch_page("pages/04_Article_View.py")
+                            switch_page("article-view")
 
                         st.divider()
 
@@ -207,7 +210,7 @@ def main() -> None:
             show_error("Failed to load reading history")
 
     with tab3:
-        st.markdown("### Your Reading Analytics")
+        st.markdown("### :material/insights: Your Reading Analytics")
         st.caption("Insights into your reading habits")
 
         col1, col2 = st.columns(2)
@@ -220,7 +223,7 @@ def main() -> None:
                     y=[5, 8, 6, 9, 7, 12, 10],
                     mode="lines+markers",
                     name="Articles Read",
-                    line=dict(color="#667eea", width=3),
+                    line=dict(color="#006B5E", width=3),
                     marker=dict(size=8),
                 )
             )
@@ -282,7 +285,7 @@ def main() -> None:
             )
 
     with tab4:
-        st.markdown("### Account Security")
+        st.markdown("### :material/shield: Account Security")
 
         with st.expander("Change Password"):
             with st.form("password_form"):
@@ -304,7 +307,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Two-Factor Authentication")
+        st.markdown("### :material/key: Two-Factor Authentication")
         st.caption("Add an extra layer of security to your account")
 
         if st.button("Enable 2FA", type="primary"):
@@ -312,25 +315,20 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Active Sessions")
+        st.markdown("### :material/devices: Active Sessions")
         st.caption("Manage your active login sessions")
 
-        sessions = [
-            {"device": "Chrome on Windows", "location": "New York, US", "last_active": "Just now"},
-            {"device": "Safari on iPhone", "location": "New York, US", "last_active": "2 hours ago"},
-        ]
-
-        for idx, session in enumerate(sessions):
+        with st.container(border=True):
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.write(f"**{session['device']}**")
-                st.caption(f"{session['location']} | {session['last_active']}")
+                st.write(f"**Current session**")
+                st.caption(f":material/person: {st.session_state.get('username', 'User')}  \u2022  Active now")
             with col2:
-                if st.button("Revoke", key=f"revoke_{idx}"):
-                    show_success("Session revoked")
-            st.divider()
+                st.badge("Current", color="green")
 
-        st.markdown("### Sign Out")
+        st.caption(":material/info: Only the current session is shown. Use logout to end it.")
+
+        st.markdown("### :material/logout: Sign Out")
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -342,7 +340,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Danger Zone")
+        st.markdown("### :material/warning: Danger Zone")
 
         with st.expander("Delete Account", expanded=False):
             st.warning("Warning: This action is permanent and cannot be undone!")

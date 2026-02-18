@@ -25,12 +25,49 @@ logger = logging.getLogger(__name__)
 
 # Global Redis client for rate limiting and caching
 redis_client: aioredis.Redis = None
+celery_monitor_task = None
+
+
+async def monitor_celery_runtime_health():
+    global redis_client
+    monitor_interval = settings.CELERY_HEARTBEAT_LOG_INTERVAL_SECONDS
+    heartbeat_ttl_seconds = max(
+        settings.CELERY_HEARTBEAT_TTL_SECONDS,
+        settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2,
+    )
+    startup_grace_seconds = heartbeat_ttl_seconds + settings.CELERY_HEARTBEAT_INTERVAL_SECONDS
+    elapsed = 0
+
+    while True:
+        try:
+            await asyncio.sleep(monitor_interval)
+            elapsed += monitor_interval
+            if not redis_client or not settings.ENABLE_NEWS_SCHEDULER:
+                continue
+
+            from app.utils.celery_helpers import get_celery_runtime_heartbeat
+
+            heartbeat = await get_celery_runtime_heartbeat(redis_client)
+            if elapsed < startup_grace_seconds:
+                continue
+            if not heartbeat.get("healthy", False):
+                beat_status = heartbeat.get("beat", {}).get("status")
+                worker_status = heartbeat.get("worker", {}).get("status")
+                logger.warning(
+                    "Celery runtime heartbeat alert: beat=%s worker=%s",
+                    beat_status,
+                    worker_status,
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Celery runtime health monitor error: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global redis_client
+    global redis_client, celery_monitor_task
 
     # Startup
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
@@ -53,12 +90,12 @@ async def lifespan(app: FastAPI):
             redis_client,
             default_ttl=settings.REDIS_CACHE_TTL,
             compression_threshold=1024,  # Compress values > 1KB
-            key_prefix="news_app"
+            key_prefix=settings.REDIS_KEY_PREFIX
         )
         logger.info(" Cache manager initialized with compression enabled")
         logger.info(f"   - Default TTL: {settings.REDIS_CACHE_TTL}s")
         logger.info(f"   - Compression threshold: 1KB")
-        logger.info(f"   - Key prefix: news_app")
+        logger.info(f"   - Key prefix: {settings.REDIS_KEY_PREFIX}")
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}. Rate limiting and caching will be disabled.")
         redis_client = None
@@ -110,6 +147,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Unable to verify Celery worker health at startup: {e}")
 
+        if redis_client:
+            celery_monitor_task = asyncio.create_task(monitor_celery_runtime_health())
+            logger.info(
+                "Celery runtime health monitor started "
+                f"(interval={settings.CELERY_HEARTBEAT_LOG_INTERVAL_SECONDS}s, "
+                f"ttl={max(settings.CELERY_HEARTBEAT_TTL_SECONDS, settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2)}s)"
+            )
+
     logger.info("Application startup complete")
 
     logger.info("Registered routes:")
@@ -141,6 +186,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application")
 
+    if celery_monitor_task:
+        celery_monitor_task.cancel()
+        try:
+            await celery_monitor_task
+        except asyncio.CancelledError:
+            pass
+        celery_monitor_task = None
     if redis_client:
         await redis_client.close()
         logger.info("Redis connection closed")
@@ -151,7 +203,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Secure news summarizer API with comprehensive security middleware and Redis caching",
+    description="Secure news central API with comprehensive security middleware and Redis caching",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
@@ -237,7 +289,7 @@ app.include_router(api_router, prefix="/api/v1")
 async def root():
     """Root endpoint"""
     return {
-        "message": "News Summarizer API",
+        "message": "News Central API",
         "version": settings.APP_VERSION,
         "docs": "/docs" if settings.DEBUG else None,
         "endpoints": {
@@ -246,7 +298,9 @@ async def root():
             "user": "/api/v1/user",
             "feedback": "/api/v1/feedback",
             "analytics": "/api/v1/analytics",
-            "recommendations": "/api/v1/recommendations"
+            "recommendations": "/api/v1/recommendations",
+            "integration_management": "/api/v1/integrations",
+            "integration_public": "/api/v1/integration",
         }
     }
 
@@ -255,13 +309,27 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     redis_status = "connected" if redis_client else "disconnected"
+    celery_runtime = {"status": "unavailable"}
+    overall_status = "healthy"
+
+    if settings.ENABLE_NEWS_SCHEDULER and redis_client:
+        try:
+            from app.utils.celery_helpers import get_celery_runtime_heartbeat
+
+            celery_runtime = await get_celery_runtime_heartbeat(redis_client)
+            if not celery_runtime.get("healthy", False):
+                overall_status = "degraded"
+        except Exception as e:
+            celery_runtime = {"status": "error", "error": str(e)}
+            overall_status = "degraded"
 
     return {
-        "status": "healthy",
+        "status": overall_status,
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "redis": redis_status,
+        "celery_runtime": celery_runtime,
         "middleware": {
             "cors": True,
             "rate_limiting": settings.RATE_LIMIT_ENABLED and redis_client is not None,

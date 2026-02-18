@@ -4,6 +4,7 @@ from typing import Optional, List
 import asyncio
 
 from app.celery_config import celery_app
+from app.core.redis_keys import redis_key
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def _async_fetch_and_save_news(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
             logger.info("Cache manager initialized for task")
 
@@ -136,7 +137,7 @@ async def _async_fetch_and_save_news(
 
                 # Update last fetch timestamp in Redis
                 await redis_client.set(
-                    'news:last_fetch_timestamp',
+                    redis_key("news", "last_fetch_timestamp"),
                     datetime.now(timezone.utc).isoformat(),
                     ex=86400  # Expire after 24 hours
                 )
@@ -199,7 +200,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
 
             # Create aggregator
@@ -215,6 +216,7 @@ async def _async_fetch_rss_feeds(feed_urls: Optional[List[str]] = None):
                 feed_urls=feed_urls,
                 limit_per_feed=20,
                 deduplicate=True,
+                language="en",
             )
             articles = pipeline_result["articles"]
             pipeline_stats = pipeline_result["pipeline_stats"]
@@ -357,7 +359,7 @@ async def _async_fetch_news_manual(
                 redis_client,
                 default_ttl=settings.REDIS_CACHE_TTL,
                 compression_threshold=1024,
-                key_prefix="news_app"
+                key_prefix=settings.REDIS_KEY_PREFIX
             )
 
             # Create aggregator
@@ -418,4 +420,35 @@ async def _async_fetch_news_manual(
     except Exception as e:
         logger.error(f"Error in manual fetch: {e}", exc_info=True)
         raise
+
+
+@celery_app.task(
+    name='app.tasks.news_tasks.record_celery_runtime_heartbeat',
+    bind=True,
+    ignore_result=True
+)
+def record_celery_runtime_heartbeat(self):
+    worker_name = getattr(self.request, "hostname", "unknown-worker")
+    return asyncio.run(_async_record_celery_runtime_heartbeat(worker_name))
+
+
+async def _async_record_celery_runtime_heartbeat(worker_name: str):
+    import redis.asyncio as aioredis
+
+    now = datetime.now(timezone.utc).isoformat()
+    ttl_seconds = max(settings.CELERY_HEARTBEAT_TTL_SECONDS, settings.CELERY_HEARTBEAT_INTERVAL_SECONDS * 2)
+    redis_client = aioredis.from_url(
+        settings.REDIS_URL,
+        encoding="utf-8",
+        decode_responses=True
+    )
+
+    try:
+        await redis_client.set(redis_key("celery", "heartbeat", "beat"), now, ex=ttl_seconds)
+        await redis_client.set(redis_key("celery", "heartbeat", "worker", "latest"), now, ex=ttl_seconds)
+        await redis_client.set(redis_key("celery", "heartbeat", "worker", worker_name), now, ex=ttl_seconds)
+        logger.debug("Updated Celery runtime heartbeat for worker=%s", worker_name)
+        return {"status": "ok", "worker": worker_name, "timestamp": now}
+    finally:
+        await redis_client.close()
 

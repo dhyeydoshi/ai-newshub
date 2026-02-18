@@ -22,9 +22,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         "/api/v1/auth/login",
         "/api/v1/auth/register",
         "/api/v1/auth/refresh",
-        "/api/v1/auth/logout",
         "/api/v1/auth/verify-email",
         "/api/v1/auth/resend-verification",
+        "/api/v1/auth/contact-developer",
         "/api/v1/auth/password-reset-request",
         "/api/v1/auth/password-reset",
     ]
@@ -44,6 +44,16 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         """Validate authentication for protected endpoints"""
         from fastapi.responses import JSONResponse
+
+        # Feature flag gate for integration APIs: fail fast before auth/dependency work.
+        if (
+            request.url.path.startswith("/api/v1/integration")
+            or request.url.path.startswith("/api/v1/integrations")
+        ) and not settings.ENABLE_INTEGRATION_API:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"detail": "Integration API is disabled"},
+            )
 
         # Skip authentication for public endpoints
         if self._is_public_path(request.url.path):
@@ -121,7 +131,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return True
 
         # Check if path starts with public prefix
-        public_prefixes = ["/docs", "/redoc", "/openapi.json", "/static"]
+        public_prefixes = ["/docs", "/redoc", "/openapi.json", "/static", "/api/v1/integration"]
         return any(path.startswith(prefix) for prefix in public_prefixes)
 
     def _extract_token(self, request: Request) -> Optional[str]:

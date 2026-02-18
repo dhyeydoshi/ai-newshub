@@ -19,10 +19,18 @@
   api:
     command: >
       sh -c "alembic upgrade head &&
-      uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips '*'"
+      exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips '*'"
     environment:
       LOG_LEVEL: WARNING
       REDIS_MAX_CONNECTIONS: 10
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 1
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-300}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-300}
     mem_limit: 240m
     mem_reservation: 176m
     cpus: "0.45"
@@ -33,6 +41,12 @@
     environment:
       LOG_LEVEL: WARNING
       REDIS_MAX_CONNECTIONS: 10
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 1
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
     mem_limit: 160m
     mem_reservation: 112m
     cpus: "0.30"
@@ -43,6 +57,12 @@
     environment:
       LOG_LEVEL: WARNING
       REDIS_MAX_CONNECTIONS: 10
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 1
+      DB_POOL_TIMEOUT: 20
+      DB_POOL_RECYCLE: 900
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
     mem_limit: 64m
     mem_reservation: 48m
     cpus: "0.10"

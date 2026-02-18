@@ -1,10 +1,11 @@
 ﻿import streamlit as st
 import plotly.graph_objects as go
 from services.api_service import api_service
-from utils.auth import init_auth_state, require_auth
+from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_error,
     show_success,
     show_loading,
@@ -12,7 +13,7 @@ from utils.ui_helpers import (
 )
 
 # Initialize
-init_page_config("Preferences | News Summarizer", "")
+init_page_config("Preferences | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -20,7 +21,17 @@ init_auth_state()
 @require_auth
 def main() -> None:
     """User preferences management"""
-    st.title("Preferences")
+    
+    # Sidebar
+    with st.sidebar:
+        username = st.session_state.get("username", "User")
+        st.markdown(f"### :material/person: {username}")
+        st.divider()
+        if st.button(":material/logout: Logout", use_container_width=True):
+            logout()
+        render_contact_developer_option()
+    
+    st.title(":material/tune: Preferences")
     st.caption("Customize your news feed and recommendation settings")
 
     st.divider()
@@ -35,10 +46,14 @@ def main() -> None:
     preferences = result["data"]
     learned_topics = preferences.get("learned_preferences", {})
 
-    tab1, tab2, tab3 = st.tabs(["Topic Preferences", "Learned Interests", "Settings"])
+    tab1, tab2, tab3 = st.tabs([
+        ":material/label: Topic Preferences",
+        ":material/psychology: Learned Interests",
+        ":material/settings: Settings",
+    ])
 
     with tab1:
-        st.markdown("### Select Your Interests")
+        st.markdown("### :material/label: Select Your Interests")
         st.caption("Choose topics you want to see more of in your feed")
 
         topic_categories = {
@@ -102,7 +117,7 @@ def main() -> None:
                     show_error(f"Failed to save: {update_result.get('error')}")
 
     with tab2:
-        st.markdown("### What We've Learned About You")
+        st.markdown("### :material/psychology: What We've Learned About You")
         st.caption("These are topics inferred from your reading behavior")
 
         if learned_topics:
@@ -117,7 +132,7 @@ def main() -> None:
                     go.Bar(
                         x=list(topics),
                         y=list(scores),
-                        marker_color="lightblue",
+                        marker_color="#006B5E",
                         text=[f"{s:.2%}" for s in scores],
                         textposition="auto",
                     )
@@ -152,14 +167,13 @@ def main() -> None:
             )
 
     with tab3:
-        st.markdown("### Notification & Display Settings")
+        st.markdown("### :material/display_settings: Notification & Display Settings")
 
         col1, col2 = st.columns(2)
 
         with col1:
             st.markdown("#### Display Preferences")
             show_images = st.checkbox("Show article images", value=True)
-            show_summaries = st.checkbox("Show summaries by default", value=True)
             compact_view = st.checkbox("Use compact view", value=False)
             dark_mode = st.checkbox("Dark mode (coming soon)", value=False, disabled=True)
 
@@ -171,7 +185,7 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### Privacy Settings")
+        st.markdown("### :material/privacy_tip: Privacy Settings")
 
         col1, col2 = st.columns(2)
 
@@ -199,23 +213,6 @@ def main() -> None:
         if st.button("Save Settings", use_container_width=True, type="primary"):
             show_success("Settings saved successfully!")
 
-    st.divider()
-
-    st.markdown("### Quick Actions")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("Refresh Feed", use_container_width=True):
-            show_toast("Feed refreshed!")
-
-    with col2:
-        if st.button("View Analytics", use_container_width=True):
-            st.info("Analytics feature coming soon!")
-
-    with col3:
-        if st.button("Export Data", use_container_width=True):
-            st.info("Data export feature coming soon!")
 
 
 if __name__ == "__main__":

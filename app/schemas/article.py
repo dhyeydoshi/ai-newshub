@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from uuid import UUID
 from app.core.sanitizer import ContentSanitizer
 
@@ -103,44 +103,9 @@ class ArticleListResponse(BaseModel):
 
 
 class ArticleDetailResponse(ArticleResponse):
-    """Detailed article with summary"""
-    summary: Optional[str] = None
+    """Detailed article response"""
+    url: Optional[str] = None
     related_articles: List[ArticleResponse] = Field(default_factory=list, max_length=5)
-
-
-class SummaryRequest(BaseModel):
-    """Article summary generation request"""
-    article_id: Optional[UUID] = None
-    url: Optional[HttpUrl] = None
-    text: Optional[str] = Field(None, min_length=100, max_length=50000)
-    max_length: int = Field(150, ge=50, le=500)
-    style: str = Field("balanced", pattern="^(brief|balanced|detailed)$")
-    include_key_points: bool = Field(default=True)
-
-    @field_validator("text")
-    @classmethod
-    def sanitize_text(cls, v: Optional[str]) -> Optional[str]:
-        """Sanitize input text"""
-        if v is None:
-            return v
-        return ContentSanitizer.sanitize_text(v)
-
-    def model_post_init(self, __context):
-        """Validate that at least one input is provided"""
-        if not any([self.article_id, self.url, self.text]):
-            raise ValueError("Must provide article_id, url, or text")
-
-
-class SummaryResponse(BaseModel):
-    """Article summary response"""
-    article_id: Optional[UUID] = None
-    summary: str
-    key_points: Optional[List[str]] = None
-    word_count: int
-    original_length: int
-    compression_ratio: float
-    generated_at: datetime
-    model_used: str
 
 
 class NewsQuery(BaseModel):

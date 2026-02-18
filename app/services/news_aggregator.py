@@ -16,6 +16,7 @@ from tenacity import (
 )
 import logging
 
+from app.core.redis_keys import redis_key
 from app.schemas.raw_article import RawArticle
 from app.utils.date_parser import parse_iso_date, parse_gdelt_date, parse_rss_date
 from config import settings
@@ -319,6 +320,29 @@ class GDELTFetcher(BaseFetcher):
 class RSSFetcher(BaseFetcher):
     """Fetch news from RSS feeds"""
 
+    @staticmethod
+    def _normalize_language_code(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return ""
+        # Keep only first token if feed provides complex values like "en-US,en;q=0.8"
+        normalized = normalized.split(",")[0].split(";")[0].strip()
+        if not normalized:
+            return ""
+        return normalized.split("-")[0].split("_")[0].strip()
+
+    @classmethod
+    def _is_language_match(cls, *, detected: Optional[str], expected: str) -> bool:
+        detected_code = cls._normalize_language_code(detected)
+        expected_code = cls._normalize_language_code(expected)
+        if not expected_code:
+            return True
+        if not detected_code:
+            return True
+        return detected_code == expected_code
+
     async def fetch(
         self,
         query: Optional[str] = None,
@@ -332,6 +356,7 @@ class RSSFetcher(BaseFetcher):
             return []
 
         topic_hints = _normalize_topic_values(kwargs.get('topic_hints') or [])
+        requested_language = self._normalize_language_code(kwargs.get('language') or "en") or "en"
 
         try:
             response = await self.circuit_breaker.async_call(
@@ -341,6 +366,15 @@ class RSSFetcher(BaseFetcher):
             )
 
             feed = feedparser.parse(response.text)
+            feed_language = self._normalize_language_code(getattr(feed, "feed", {}).get("language"))
+            if feed_language and not self._is_language_match(detected=feed_language, expected=requested_language):
+                logger.info(
+                    "RSS (%s): skipped feed due to language mismatch (feed=%s requested=%s)",
+                    url[:80],
+                    feed_language,
+                    requested_language,
+                )
+                return []
 
             articles = []
             for entry in feed.entries[:limit]:
@@ -352,6 +386,14 @@ class RSSFetcher(BaseFetcher):
                     content = entry.summary
                 elif hasattr(entry, 'description'):
                     content = entry.description
+
+                entry_language = self._normalize_language_code(
+                    entry.get('language')
+                    or entry.get('dc_language')
+                    or feed_language
+                )
+                if not self._is_language_match(detected=entry_language, expected=requested_language):
+                    continue
 
                 # Extract image
                 image_url = self._extract_image(entry)
@@ -369,6 +411,7 @@ class RSSFetcher(BaseFetcher):
                     'author': entry.get('author'),
                     'published_date': parse_rss_date(entry),
                     'image_url': image_url,
+                    'language': entry_language or requested_language,
                     'topics': entry_topics,
                     'tags': tags
                 })
@@ -435,7 +478,7 @@ class NewsCacheManager:
             parts.append(query)
         for k, v in sorted(kwargs.items()):
             parts.append(f"{k}:{v}")
-        return f"news:{':'.join(parts)}"
+        return redis_key("news", ":".join(parts))
 
 
 class NewsAggregatorService:
@@ -516,22 +559,51 @@ class NewsAggregatorService:
             if source == 'rss':
                 feed_urls = kwargs.get('feed_urls', [])
                 feed_url = kwargs.get('feed_url')
+                rss_language = kwargs.get('language', 'en')
                 if not feed_urls and topics:
                     feed_urls = settings.get_rss_feed_urls_for_topics(topics)
                 if feed_urls:
                     for url in feed_urls:
                         rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
-                        tasks.append(fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints))
+                        tasks.append(
+                            fetcher.fetch(
+                                feed_url=url,
+                                limit=source_limit,
+                                topic_hints=rss_topic_hints,
+                                language=rss_language,
+                            )
+                        )
                 elif feed_url:
                     rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(feed_url))
-                    tasks.append(fetcher.fetch(feed_url=feed_url, limit=source_limit, topic_hints=rss_topic_hints))
+                    tasks.append(
+                        fetcher.fetch(
+                            feed_url=feed_url,
+                            limit=source_limit,
+                            topic_hints=rss_topic_hints,
+                            language=rss_language,
+                        )
+                    )
                 elif query and query.startswith(('http://', 'https://')):
                     rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(query))
-                    tasks.append(fetcher.fetch(feed_url=query, limit=source_limit, topic_hints=rss_topic_hints))
+                    tasks.append(
+                        fetcher.fetch(
+                            feed_url=query,
+                            limit=source_limit,
+                            topic_hints=rss_topic_hints,
+                            language=rss_language,
+                        )
+                    )
                 elif settings.ENABLE_RSS_FEEDS and settings.RSS_FEED_URLS:
                     for url in settings.RSS_FEED_URLS:
                         rss_topic_hints = _normalize_topic_values(topics + self._topics_for_feed_url(url))
-                        tasks.append(fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints))
+                        tasks.append(
+                            fetcher.fetch(
+                                feed_url=url,
+                                limit=source_limit,
+                                topic_hints=rss_topic_hints,
+                                language=rss_language,
+                            )
+                        )
             else:
                 tasks.append(fetcher.fetch(query=query, limit=source_limit, topic_hints=topics, **kwargs))
 
@@ -568,7 +640,8 @@ class NewsAggregatorService:
         self,
         feed_urls: List[str],
         limit_per_feed: int = 10,
-        deduplicate: bool = True
+        deduplicate: bool = True,
+        language: str = "en",
     ) -> List[Dict[str, Any]]:
         """Fetch from multiple RSS feeds."""
         rss_fetcher = self.fetchers['rss']
@@ -578,7 +651,12 @@ class NewsAggregatorService:
         for url in feed_urls:
             rss_topic_hints = self._topics_for_feed_url(url)
             tasks.append(
-                rss_fetcher.fetch(feed_url=url, limit=source_limit, topic_hints=rss_topic_hints)
+                rss_fetcher.fetch(
+                    feed_url=url,
+                    limit=source_limit,
+                    topic_hints=rss_topic_hints,
+                    language=language,
+                )
             )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

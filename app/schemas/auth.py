@@ -83,6 +83,18 @@ class ResendVerification(BaseModel):
     email: EmailStr
 
 
+class DeveloperContactRequest(BaseModel):
+    """Public contact request from frontend sidebar."""
+    name: str = Field(..., min_length=1, max_length=100)
+    email: EmailStr
+    message: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("name", "message")
+    @classmethod
+    def sanitize_text(cls, v: str) -> str:
+        return v.strip()
+
+
 class UserResponse(BaseModel):
     """User response"""
     user_id: UUID

@@ -10,7 +10,6 @@ from app.models.article import Article
 from app.models.user import User
 from app.schemas.feedback import (
     ArticleFeedbackRequest,
-    SummaryFeedbackRequest,
     FeedbackResponse,
     ReadingInteractionRequest,
     InteractionResponse
@@ -107,38 +106,6 @@ async def submit_article_feedback(
     logger.info(f"Feedback submitted - User: {user.user_id}, Article: {feedback.article_id}, Type: {feedback.feedback_type}")
 
     return FeedbackResponse.model_validate(new_feedback)
-
-
-@router.post("/summary", response_model=MessageResponse)
-async def submit_summary_feedback(
-    feedback: SummaryFeedbackRequest,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    # Verify article exists
-    article_result = await db.execute(
-        select(Article).where(Article.article_id == feedback.article_id)
-    )
-    article = article_result.scalar_one_or_none()
-
-    if not article:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Article not found"
-        )
-
-    logger.info(
-        f"Summary feedback - Article: {feedback.article_id}, "
-        f"Helpful: {feedback.summary_helpful}, "
-        f"Accuracy: {feedback.accuracy_rating}, "
-        f"Completeness: {feedback.completeness_rating}, "
-        f"Clarity: {feedback.clarity_rating}"
-    )
-
-    return MessageResponse(
-        message="Summary feedback submitted successfully",
-        success=True
-    )
 
 
 @router.post("/interaction", response_model=InteractionResponse)

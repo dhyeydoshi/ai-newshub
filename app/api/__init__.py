@@ -11,6 +11,8 @@ def include_routers():
     from app.api.analytics import router as analytics_router
     from app.api.recommendations import router as recommendations_router
     from app.api.news import router as news_router
+    from app.api.integration_management import router as integration_management_router
+    from app.api.integrations import router as integrations_router
 
     api_router.include_router(auth_router, tags=["Authentication"])
     api_router.include_router(articles_router,tags=["Articles"])
@@ -19,6 +21,8 @@ def include_routers():
     api_router.include_router(analytics_router, tags=["Analytics"])
     api_router.include_router(recommendations_router, tags=["Recommendations"])
     api_router.include_router(news_router, tags=["News Aggregation"])
+    api_router.include_router(integration_management_router, tags=["Integration Management"])
+    api_router.include_router(integrations_router, tags=["Integration API"])
 
     return api_router
 

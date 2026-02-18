@@ -119,7 +119,7 @@ if __name__ == "__main__":
     print()
     print("=" * 50)
     print("  JWT RSA Key Generator")
-    print("  For News Summarizer API")
+    print("  For News Central API")
     print("=" * 50)
     print()
 

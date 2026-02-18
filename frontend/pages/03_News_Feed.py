@@ -5,6 +5,7 @@ from utils.auth import init_auth_state, require_auth, logout
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
+    render_contact_developer_option,
     show_article_card,
     show_error,
     show_loading,
@@ -13,7 +14,7 @@ from utils.ui_helpers import (
 from frontend_config import config
 
 # Initialize
-init_page_config("News Feed | News Summarizer", "")
+init_page_config("News Feed | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -39,34 +40,32 @@ def _extract_recommendations(data):
     return []
 
 
+AVAILABLE_TOPICS = [
+    "Technology",
+    "Science",
+    "Business",
+    "Politics",
+    "Sports",
+    "Entertainment",
+    "Health",
+    "World",
+]
+
+
 @require_auth
 def main() -> None:
     """Main news feed"""
 
-    # Header
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.title("Your News Feed")
-        st.caption(f"Welcome back, **{st.session_state.get('username', 'User')}**!")
-
-    with col2:
-        if st.button("Refresh", use_container_width=True):
-            st.session_state.feed_page = 1
-            st.session_state.feed_articles = []
-            st.rerun()
-
-    st.divider()
-
-    # Sidebar filters
+    # ── Sidebar (minimal: user info + feed type) ──
     with st.sidebar:
-        st.markdown(f"Logged in as **{st.session_state.get('username', 'User')}**")
-        if st.button("Logout", use_container_width=True):
+        st.markdown(f":material/person: Logged in as **{st.session_state.get('username', 'User')}**")
+        if st.button(":material/logout: Logout", use_container_width=True):
             logout()
+        render_contact_developer_option()
 
         st.divider()
-        st.markdown("### Feed Settings")
+        st.markdown("### :material/tune: Feed Mode")
 
-        # Feed type selector
         feed_options = ["latest", "personalized", "search"]
         if st.session_state.feed_type in feed_options:
             default_index = feed_options.index(st.session_state.feed_type)
@@ -77,9 +76,9 @@ def main() -> None:
             feed_options,
             index=default_index,
             format_func=lambda x: {
-                "latest": "Latest News",
-                "personalized": "Personalized",
-                "search": "Search",
+                "latest": ":material/breaking_news: Latest News",
+                "personalized": ":material/recommend: Personalized",
+                "search": ":material/search: Search",
             }[x],
             key="feed_type_selector",
         )
@@ -90,63 +89,27 @@ def main() -> None:
             st.session_state.feed_articles = []
             st.rerun()
 
-        st.divider()
+    # ── Header ──
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title(":material/newspaper: Your News Feed")
+        st.caption(f"Welcome back, **{st.session_state.get('username', 'User')}**!")
 
-        # Topic filters
-        if feed_type in ["personalized", "latest"]:
-            st.markdown("#### Filter by Topics")
+    with col2:
+        if st.button(":material/refresh: Refresh", use_container_width=True):
+            st.session_state.feed_page = 1
+            st.session_state.feed_articles = []
+            st.rerun()
 
-            available_topics = [
-                "Technology",
-                "Science",
-                "Business",
-                "Politics",
-                "Sports",
-                "Entertainment",
-                "Health",
-                "World",
-            ]
+    # ── Inline filters (search bar + topics) ──
+    if st.session_state.feed_type == "search":
+        _render_search_bar()
+    elif st.session_state.feed_type in ("latest", "personalized"):
+        _render_topic_filter()
 
-            selected_topics = st.multiselect(
-                "Select topics",
-                available_topics,
-                default=st.session_state.selected_topics,
-                help="Filter articles by topics",
-            )
+    st.divider()
 
-            if selected_topics != st.session_state.selected_topics:
-                st.session_state.selected_topics = selected_topics
-                st.session_state.feed_page = 1
-                st.session_state.feed_articles = []
-                st.rerun()
-
-        # Search box
-        elif feed_type == "search":
-            st.markdown("#### Search News")
-            search_query = st.text_input(
-                "Search query",
-                placeholder="Enter keywords...",
-                key="search_query",
-            )
-
-            if st.button("Search", use_container_width=True, type="primary"):
-                if search_query:
-                    st.session_state.search_query_active = search_query
-                    st.session_state.feed_page = 1
-                    st.session_state.feed_articles = []
-                    st.rerun()
-
-        st.divider()
-
-        # Quick stats
-        st.markdown("#### Your Stats")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Articles Read", "42")
-        with col2:
-            st.metric("This Week", "+12")
-
-    # Main content area
+    # ── Main content ──
     if st.session_state.feed_type == "personalized":
         show_personalized_feed()
     elif st.session_state.feed_type == "latest":
@@ -155,9 +118,53 @@ def main() -> None:
         show_search_results()
 
 
+# ─── Inline filter components ───────────────────────────────────────────────
+
+
+def _render_search_bar() -> None:
+    """Search box rendered in the main content area."""
+    col_input, col_btn = st.columns([4, 1])
+    with col_input:
+        search_query = st.text_input(
+            "Search news",
+            placeholder="Enter keywords...",
+            key="search_query",
+            icon=":material/search:",
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        search_clicked = st.button(
+            ":material/search: Search",
+            use_container_width=True,
+            type="primary",
+        )
+
+    if search_clicked and search_query:
+        st.session_state.search_query_active = search_query
+        st.session_state.feed_page = 1
+        st.session_state.feed_articles = []
+        st.rerun()
+
+
+def _render_topic_filter() -> None:
+    """Topic multiselect rendered in the main content area."""
+    selected_topics = st.multiselect(
+        ":material/label: Filter by Topics",
+        AVAILABLE_TOPICS,
+        default=st.session_state.selected_topics,
+        key="topic_filter_inline",
+    )
+
+    if selected_topics != st.session_state.selected_topics:
+        st.session_state.selected_topics = selected_topics
+        st.session_state.feed_page = 1
+        st.session_state.feed_articles = []
+        st.rerun()
+
+
 def show_personalized_feed() -> None:
     """Display personalized recommendations"""
-    st.markdown("### Recommended for You")
+    st.markdown("### :material/recommend: Recommended for You")
     st.caption("Articles selected based on your reading preferences")
 
     if not st.session_state.feed_articles:
@@ -186,12 +193,12 @@ def show_personalized_feed() -> None:
                     show_toast("Loaded more articles!")
                     st.rerun()
     else:
-        st.info("No recommendations available yet. Start reading articles to get personalized suggestions!")
+        st.info(":material/lightbulb: No recommendations yet — start reading articles and giving feedback to unlock personalized suggestions!")
 
 
 def show_latest_feed() -> None:
     """Display latest news"""
-    st.markdown("### Latest News")
+    st.markdown("### :material/breaking_news: Latest News")
     st.caption("Fresh articles from all sources")
 
     topics = [t.lower() for t in st.session_state.selected_topics]
@@ -265,28 +272,77 @@ def show_latest_feed() -> None:
                     show_toast("Loaded more articles!")
                     st.rerun()
     else:
-        st.info("No articles available")
+        st.info(":material/inbox: No articles match these filters. Try broadening your topic selection.")
 
 def show_search_results() -> None:
-    """Display search results"""
+    """Display search results with filters, facets, and suggestions."""
     query = st.session_state.get("search_query_active", "")
 
     if not query:
-        st.info("Enter a search query in the sidebar to find articles")
+        st.info(":material/search: Type a query above and press Search to find articles.")
         return
 
-    st.markdown(f"### Search Results for '{query}'")
+    st.markdown(f"### :material/search: Results for \u201c{query}\u201d")
+
+    # ── Search filters row ──
+    f1, f2, f3, f4 = st.columns([2, 3, 2, 2])
+    with f1:
+        sort_by = st.selectbox(
+            "Sort by",
+            ["relevance", "date", "popularity"],
+            format_func=lambda x: {
+                "relevance": "Relevance",
+                "date": "Most Recent",
+                "popularity": "Most Popular",
+            }[x],
+            key="search_sort_by",
+        )
+    with f2:
+        search_topics = st.multiselect(
+            "Filter topics",
+            AVAILABLE_TOPICS,
+            default=st.session_state.get("_search_topics", []),
+            key="search_topics_filter",
+        )
+        # persist so we can detect changes
+        if search_topics != st.session_state.get("_search_topics", []):
+            st.session_state._search_topics = search_topics
+    with f3:
+        from_date = st.date_input("From", value=None, key="search_from_date")
+    with f4:
+        to_date = st.date_input("To", value=None, key="search_to_date")
+
+    # Determine whether filters changed → re-fetch
+    filter_key = f"{sort_by}|{','.join(search_topics)}|{from_date}|{to_date}"
+    if filter_key != st.session_state.get("_search_filter_key", ""):
+        st.session_state._search_filter_key = filter_key
+        st.session_state.feed_page = 1
+        st.session_state.feed_articles = []
+
+    topics_lower = [t.lower() for t in search_topics] if search_topics else None
 
     if not st.session_state.feed_articles or st.session_state.feed_page == 1:
-        with show_loading(f"Searching for '{query}'..."):
+        from_str = from_date.isoformat() if from_date else None
+        to_str = to_date.isoformat() if to_date else None
+
+        with show_loading(f"Searching for \u201c{query}\u201d..."):
             result = api_service.search_news(
                 query=query,
                 page=st.session_state.feed_page,
                 limit=config.ARTICLES_PER_PAGE,
+                sort_by=sort_by,
+                topics=topics_lower,
+                from_date=from_str,
+                to_date=to_str,
             )
 
         if result["success"]:
-            articles = result["data"].get("articles", [])
+            data = result.get("data", {})
+            # Backend returns "results" (not "articles")
+            articles = data.get("results", data.get("articles", []))
+            st.session_state._search_total = data.get("total", len(articles))
+            st.session_state._search_suggestions = data.get("suggestions", [])
+            st.session_state._search_facets = data.get("facets", {})
             if st.session_state.feed_page == 1:
                 st.session_state.feed_articles = articles
             else:
@@ -295,30 +351,57 @@ def show_search_results() -> None:
             show_error(f"Search failed: {result.get('error')}")
             return
 
+    total = st.session_state.get("_search_total", 0)
+    facets = st.session_state.get("_search_facets", {})
+
     if st.session_state.feed_articles:
-        st.caption(f"Found {len(st.session_state.feed_articles)} results")
+        st.caption(f"Showing {len(st.session_state.feed_articles)} of {total} results")
+
+        # Show facets as badges if available
+        topic_facets = facets.get("topics", {})
+        if topic_facets:
+            top_topics = sorted(topic_facets.items(), key=lambda x: x[1], reverse=True)[:6]
+            facet_cols = st.columns(min(len(top_topics), 6) + 1, gap="small")
+            for i, (topic, count) in enumerate(top_topics):
+                with facet_cols[i]:
+                    st.badge(f"{topic} ({count})", color="blue")
 
         for article in st.session_state.feed_articles:
             show_article_card(article, show_feedback=True)
 
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("Load More", use_container_width=True):
-                st.session_state.feed_page += 1
-                with show_loading("Loading more results..."):
-                    result = api_service.search_news(
-                        query=query,
-                        page=st.session_state.feed_page,
-                        limit=config.ARTICLES_PER_PAGE,
-                    )
+        # Load more if there are more results
+        if len(st.session_state.feed_articles) < total:
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                if st.button(":material/expand_more: Load More", use_container_width=True):
+                    st.session_state.feed_page += 1
+                    from_str = from_date.isoformat() if from_date else None
+                    to_str = to_date.isoformat() if to_date else None
 
-                if result["success"]:
-                    new_articles = result["data"].get("articles", [])
-                    st.session_state.feed_articles.extend(new_articles)
-                    show_toast("Loaded more results!")
-                    st.rerun()
+                    with show_loading("Loading more results..."):
+                        result = api_service.search_news(
+                            query=query,
+                            page=st.session_state.feed_page,
+                            limit=config.ARTICLES_PER_PAGE,
+                            sort_by=sort_by,
+                            topics=topics_lower,
+                            from_date=from_str,
+                            to_date=to_str,
+                        )
+
+                    if result["success"]:
+                        data = result.get("data", {})
+                        new_articles = data.get("results", data.get("articles", []))
+                        st.session_state.feed_articles.extend(new_articles)
+                        show_toast("Loaded more results!")
+                        st.rerun()
     else:
-        st.warning(f"No results found for '{query}'. Try different keywords.")
+        suggestions = st.session_state.get("_search_suggestions", [])
+        if suggestions:
+            st.warning(f":material/search_off: No results for \u201c{query}\u201d.")
+            st.caption("**Suggestions:** " + " \u2022 ".join(suggestions))
+        else:
+            st.warning(f":material/search_off: No results for \u201c{query}\u201d. Try different keywords or broaden your query.")
 
 
 if __name__ == "__main__":

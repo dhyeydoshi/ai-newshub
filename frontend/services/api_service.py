@@ -3,23 +3,36 @@ import logging
 import requests
 import streamlit as st
 from frontend_config import config
+from utils.cookies import get_browser_cookie, set_browser_cookie, delete_browser_cookie
 
 logger = logging.getLogger(__name__)
 
 
 class APIService:
-    """Service for making API calls"""
+    """Service for making API calls to the backend."""
+
+    _REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
 
     def __init__(self) -> None:
         self.base_url = config.API_ENDPOINT
-        self.session = requests.Session()
+
+    @staticmethod
+    def _get_session() -> requests.Session:
+        """Return a per-Streamlit-user requests.Session.
+
+        Stored in st.session_state so each browser session gets its own
+        cookie jar, preventing cross-user token leakage.
+        """
+        if "_http_session" not in st.session_state:
+            st.session_state["_http_session"] = requests.Session()
+        return st.session_state["_http_session"]
+
+    # ── internal helpers ──────────────────────────────────────────────
 
     def _get_token(self) -> Optional[str]:
-        """Get JWT token from session state"""
         return st.session_state.get("access_token")
 
     def _get_headers(self, include_auth: bool = True) -> Dict[str, str]:
-        """Get request headers"""
         headers = config.get_headers()
         if include_auth:
             token = self._get_token()
@@ -27,8 +40,12 @@ class APIService:
                 headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
-        """Handle API response"""
+    def _handle_response(
+        self,
+        response: requests.Response,
+        *,
+        logout_on_401: bool = True,
+    ) -> Dict[str, Any]:
         try:
             response.raise_for_status()
             try:
@@ -36,14 +53,18 @@ class APIService:
             except ValueError:
                 return {"success": True, "data": {"raw": response.text}}
         except requests.exceptions.HTTPError as exc:
-            if response.status_code == 401:
-                # Token expired - clear session
+            if response.status_code == 401 and logout_on_401:
                 self._clear_auth()
                 st.rerun()
             logger.error("HTTP Error: %s", exc)
             try:
                 error_data = response.json()
-                return {"success": False, "error": error_data.get("error", str(exc))}
+                error_message = (
+                    error_data.get("error")
+                    or error_data.get("detail")
+                    or str(exc)
+                )
+                return {"success": False, "error": error_message}
             except ValueError:
                 return {"success": False, "error": str(exc)}
         except Exception as exc:
@@ -51,60 +72,116 @@ class APIService:
             return {"success": False, "error": str(exc)}
 
     def _clear_auth(self) -> None:
-        """Clear authentication data"""
-        for key in ["access_token", "refresh_token", "user_id", "username", "is_authenticated"]:
-            if key in st.session_state:
-                del st.session_state[key]
+        for key in [
+            "access_token",
+            "refresh_token",
+            "user_id",
+            "username",
+            "is_authenticated",
+            "integration_api_key_vault",
+            "integration_last_api_key",
+        ]:
+            st.session_state.pop(key, None)
 
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+        params: Optional[Dict[str, Any]] = None,
+        include_auth: bool = True,
+    ) -> Dict[str, Any]:
+        """Generic request helper that wraps every API call."""
+        try:
+            response = self._get_session().request(
+                method,
+                f"{self.base_url}{path}",
+                json=json,
+                params=params,
+                headers=self._get_headers(include_auth=include_auth),
+                timeout=self._REQUEST_TIMEOUT,
+            )
+            return self._handle_response(response, logout_on_401=include_auth)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    # ── auth ──────────────────────────────────────────────────────────
 
     def register(self, email: str, password: str, username: str, full_name: str) -> Dict[str, Any]:
-        """Register new user"""
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/register",
-                json={
-                    "email": email,
-                    "password": password,
-                    "username": username,
-                    "full_name": full_name,
-                },
-                headers=self._get_headers(include_auth=False),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request(
+            "POST", "/auth/register", include_auth=False,
+            json={"email": email, "password": password, "username": username, "full_name": full_name},
+        )
+
+    def contact_developer(self, name: str, email: str, message: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/contact-developer",
+            include_auth=False,
+            json={"name": name, "email": email, "message": message},
+        )
+
+    def verify_email(self, token: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/verify-email",
+            include_auth=False,
+            json={"token": token},
+        )
+
+    def resend_verification(self, email: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/resend-verification",
+            include_auth=False,
+            json={"email": email},
+        )
+
+    def request_password_reset(self, email: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/password-reset-request",
+            include_auth=False,
+            json={"email": email},
+        )
+
+    def reset_password(self, token: str, new_password: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/auth/password-reset",
+            include_auth=False,
+            json={"token": token, "new_password": new_password},
+        )
 
     def login(self, email: str, password: str, remember_me: bool = False) -> Dict[str, Any]:
-        """Login user"""
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/login",
-                json={"email": email, "password": password, "remember_me": remember_me},
-                headers=self._get_headers(include_auth=False),
-            )
-            result = self._handle_response(response)
+        result = self._request(
+            "POST", "/auth/login", include_auth=False,
+            json={"email": email, "password": password, "remember_me": remember_me},
+        )
+        if result["success"]:
+            data = result["data"]
+            st.session_state.access_token = data.get("access_token")
+            st.session_state.refresh_token = data.get("refresh_token")
+            st.session_state.user_id = data.get("user", {}).get("user_id")
+            st.session_state.username = data.get("user", {}).get("username")
+            st.session_state.is_authenticated = True
 
-            if result["success"]:
-                data = result["data"]
-                st.session_state.access_token = data.get("access_token")
-                st.session_state.refresh_token = data.get("refresh_token")
-                st.session_state.user_id = data.get("user", {}).get("user_id")
-                st.session_state.username = data.get("user", {}).get("username")
-                st.session_state.is_authenticated = True
-
-            return result
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            # Persist refresh token in a browser cookie so it survives page refresh
+            rt = data.get("refresh_token")
+            if rt:
+                max_age = config.SESSION_MAX_AGE
+                set_browser_cookie(rt, max_age=max_age)
+        return result
 
     def logout(self, all_devices: bool = False) -> Dict[str, Any]:
-        """Logout user from current device or all devices."""
         endpoint = "/auth/logout-all" if all_devices else "/auth/logout"
         try:
-            response = self.session.post(
+            response = self._get_session().post(
                 f"{self.base_url}{endpoint}",
-                headers=self._get_headers(include_auth=all_devices),
+                headers=self._get_headers(include_auth=True),
+                timeout=self._REQUEST_TIMEOUT,
             )
-
             if response.ok:
                 try:
                     data = response.json()
@@ -127,241 +204,231 @@ class APIService:
             return {"success": False, "error": str(exc)}
         finally:
             self._clear_auth()
-            self.session.cookies.clear()
+            self._get_session().cookies.clear()
+            delete_browser_cookie()
 
-    def refresh_token(self) -> Dict[str, Any]:
-        """Refresh access token"""
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/refresh",
-                headers=self._get_headers(include_auth=False),
-            )
-            result = self._handle_response(response)
+    def refresh_token(self, token: Optional[str] = None) -> Dict[str, Any]:
+        payload = {"refresh_token": token} if token else None
+        result = self._request(
+            "POST", "/auth/refresh", include_auth=False, json=payload,
+        )
+        if result["success"]:
+            st.session_state.access_token = result["data"].get("access_token")
+            st.session_state.is_authenticated = True
 
-            if result["success"]:
-                data = result["data"]
-                st.session_state.access_token = data.get("access_token")
-                st.session_state.is_authenticated = True
-
-            return result
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            # Rotate the browser cookie to the new refresh token
+            new_rt = result["data"].get("refresh_token")
+            if new_rt:
+                st.session_state.refresh_token = new_rt
+                set_browser_cookie(new_rt, max_age=config.SESSION_MAX_AGE)
+        return result
 
     def auto_login(self) -> bool:
-        """Attempt auto-login using persistent cookie"""
         try:
-            if not self.session.cookies.get("refresh_token"):
-                return False
+            # 1. Try browser cookie first (page-refresh recovery path)
+            browser_rt = get_browser_cookie()
+            if browser_rt:
+                result = self.refresh_token(token=browser_rt)
+                if result["success"]:
+                    st.session_state.is_authenticated = True
+                    profile_result = self.get_profile()
+                    if profile_result["success"]:
+                        user = profile_result["data"]
+                        st.session_state.user_id = user.get("user_id")
+                        st.session_state.username = user.get("username")
+                    return True
+                # Browser cookie was invalid/expired — remove it
+                delete_browser_cookie()
 
-            result = self.refresh_token()
-            if result["success"]:
-                st.session_state.is_authenticated = True
+            # 2. Fall back to requests.Session cookie jar
+            session_rt = self._get_session().cookies.get("refresh_token")
+            if session_rt:
+                result = self.refresh_token(token=session_rt)
+                if result["success"]:
+                    st.session_state.is_authenticated = True
+                    profile_result = self.get_profile()
+                    if profile_result["success"]:
+                        user = profile_result["data"]
+                        st.session_state.user_id = user.get("user_id")
+                        st.session_state.username = user.get("username")
+                    return True
+                self._get_session().cookies.clear()
 
-                profile_result = self.get_profile()
-                if profile_result["success"]:
-                    user = profile_result["data"]
-                    st.session_state.user_id = user.get("user_id")
-                    st.session_state.username = user.get("username")
-
-                return True
-
-            self.session.cookies.clear()
             return False
         except Exception as exc:
             logger.error("Auto-login failed: %s", exc)
-            self.session.cookies.clear()
+            self._get_session().cookies.clear()
             return False
 
+    # ── news ──────────────────────────────────────────────────────────
 
     def get_latest_news(
-        self, page: int = 1, limit: int = 10, topics: Optional[List[str]] = None
+        self, page: int = 1, limit: int = 10, topics: Optional[List[str]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get latest news articles from database"""
-        try:
-            params = {"page": page, "page_size": limit}
-            if topics:
-                params["topics"] = topics
-
-            response = self.session.get(
-                f"{self.base_url}/news/articles",
-                params=params,
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        params: Dict[str, Any] = {"page": page, "page_size": limit}
+        if topics:
+            params["topics"] = topics
+        if language:
+            params["language"] = language
+        return self._request("GET", "/news/articles", params=params)
 
     def get_article(self, article_id: str) -> Dict[str, Any]:
-        """Get article details"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/news/article/{article_id}",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", f"/news/article/{article_id}")
 
-    def search_news(self, query: str, page: int = 1, limit: int = 10) -> Dict[str, Any]:
-        """Search news articles"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/news/search",
-                params={"query": query, "page": page, "page_size": limit},
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
-
-    def summarize_article(self, article_id: str, summary_length: str = "medium") -> Dict[str, Any]:
-        """Get article summary"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/news/summary/{article_id}",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+    def search_news(
+        self,
+        query: str,
+        page: int = 1,
+        limit: int = 10,
+        topics: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        sort_by: str = "relevance",
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "query": query,
+            "page": page,
+            "page_size": limit,
+            "sort_by": sort_by,
+        }
+        if topics:
+            params["topics"] = topics
+        if sources:
+            params["sources"] = sources
+        if from_date:
+            params["from_date"] = from_date
+        if to_date:
+            params["to_date"] = to_date
+        return self._request("GET", "/news/search", params=params)
 
     def trigger_news_fetch(
         self,
         queries: Optional[List[str]] = None,
         sources: Optional[List[str]] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> Dict[str, Any]:
-        """Manually trigger news fetch (requires authentication)"""
-        try:
-            params = {"limit": limit}
-            if queries:
-                params["queries"] = queries
-            if sources:
-                params["sources"] = sources
-
-            response = self.session.post(
-                f"{self.base_url}/news/fetch-now",
-                params=params,
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        params: Dict[str, Any] = {"limit": limit}
+        if queries:
+            params["queries"] = queries
+        if sources:
+            params["sources"] = sources
+        return self._request("POST", "/news/fetch-now", params=params)
 
     def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        """Get Celery task status."""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/news/task-status/{task_id}",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", f"/news/task-status/{task_id}")
 
-    def get_scheduler_status(self) -> Dict[str, Any]:
-        """Get news scheduler status"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/news/scheduler/status",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
-
+    # ── recommendations & feedback ────────────────────────────────────
 
     def get_recommendations(self, limit: int = 10) -> Dict[str, Any]:
-        """Get personalized recommendations"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/recommendations",
-                params={"limit": limit},
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", "/recommendations", params={"limit": limit})
 
     def submit_feedback(
-        self, article_id: str, feedback_type: str, time_spent_seconds: Optional[int] = None
+        self, article_id: str, feedback_type: str, time_spent_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Submit article feedback"""
-        try:
-            payload: Dict[str, Any] = {
-                "article_id": article_id,
-                "feedback_type": feedback_type,
-            }
-            if time_spent_seconds:
-                payload["engagement_metrics"] = {"time_spent_seconds": time_spent_seconds}
+        payload: Dict[str, Any] = {"article_id": article_id, "feedback_type": feedback_type}
+        if time_spent_seconds:
+            payload["engagement_metrics"] = {"time_spent_seconds": time_spent_seconds}
+        return self._request("POST", "/feedback/article", json=payload)
 
-            response = self.session.post(
-                f"{self.base_url}/feedback/article",
-                json=payload,
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
-
+    # ── user ──────────────────────────────────────────────────────────
 
     def get_profile(self) -> Dict[str, Any]:
-        """Get user profile"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/user/profile",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", "/user/profile")
 
     def update_profile(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update user profile"""
-        try:
-            response = self.session.put(
-                f"{self.base_url}/user/profile",
-                json=data,
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("PUT", "/user/profile", json=data)
 
     def get_preferences(self) -> Dict[str, Any]:
-        """Get user preferences"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/user/preferences",
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", "/user/preferences")
 
     def update_preferences(self, preferences: Dict[str, Any]) -> Dict[str, Any]:
-        """Update user preferences"""
-        try:
-            response = self.session.put(
-                f"{self.base_url}/user/preferences",
-                json=preferences,
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("PUT", "/user/preferences", json=preferences)
 
     def get_reading_history(self, limit: int = 50) -> Dict[str, Any]:
-        """Get reading history"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/user/reading-history",
-                params={"page": 1, "page_size": limit},
-                headers=self._get_headers(),
-            )
-            return self._handle_response(response)
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
+        return self._request("GET", "/user/reading-history", params={"page": 1, "page_size": limit})
+
+    # ── integration: api keys ─────────────────────────────────────────
+
+    def create_api_key(
+        self, name: str, scopes: Optional[List[str]] = None, expires_in_days: int = 30,
+    ) -> Dict[str, Any]:
+        return self._request("POST", "/integrations/api-keys", json={
+            "name": name, "scopes": scopes or ["feed:read"], "expires_in_days": expires_in_days,
+        })
+
+    def list_api_keys(self) -> Dict[str, Any]:
+        return self._request("GET", "/integrations/api-keys")
+
+    def revoke_api_key(self, key_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/api-keys/{key_id}")
+
+    def delete_api_key(self, key_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/api-keys/{key_id}/permanent")
+
+    def rotate_api_key(self, key_id: str) -> Dict[str, Any]:
+        return self._request("POST", f"/integrations/api-keys/{key_id}/rotate")
+
+    # ── integration: feeds ────────────────────────────────────────────
+
+    def create_feed(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", "/integrations/feeds", json=data)
+
+    def list_feeds(self) -> Dict[str, Any]:
+        return self._request("GET", "/integrations/feeds")
+
+    def get_feed(self, feed_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/integrations/feeds/{feed_id}")
+
+    def update_feed(self, feed_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("PUT", f"/integrations/feeds/{feed_id}", json=data)
+
+    def delete_feed(self, feed_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/feeds/{feed_id}")
+
+    # ── integration: bundles ──────────────────────────────────────────
+
+    def create_bundle(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", "/integrations/bundles", json=data)
+
+    def list_bundles(self) -> Dict[str, Any]:
+        return self._request("GET", "/integrations/bundles")
+
+    def get_bundle(self, bundle_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/integrations/bundles/{bundle_id}")
+
+    def update_bundle(self, bundle_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("PATCH", f"/integrations/bundles/{bundle_id}", json=data)
+
+    def delete_bundle(self, bundle_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/bundles/{bundle_id}")
+
+    def add_feed_to_bundle(self, bundle_id: str, feed_id: str) -> Dict[str, Any]:
+        return self._request("PUT", f"/integrations/bundles/{bundle_id}/feeds/{feed_id}")
+
+    def remove_feed_from_bundle(self, bundle_id: str, feed_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/bundles/{bundle_id}/feeds/{feed_id}")
+
+    # ── integration: webhooks ─────────────────────────────────────────
+
+    def create_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", "/integrations/webhooks", json=data)
+
+    def list_webhooks(self) -> Dict[str, Any]:
+        return self._request("GET", "/integrations/webhooks")
+
+    def update_webhook(self, webhook_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("PATCH", f"/integrations/webhooks/{webhook_id}", json=data)
+
+    def delete_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/integrations/webhooks/{webhook_id}")
+
+    def test_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        return self._request("POST", f"/integrations/webhooks/{webhook_id}/test")
+
+    def get_integration_stats(self) -> Dict[str, Any]:
+        return self._request("GET", "/integrations/stats")
 
 
 # Export singleton instance

@@ -1,8 +1,11 @@
 from typing import Optional
 from fastapi import Request, HTTPException, status
 from datetime import datetime
+import secrets
+import time
 import logging
 from app.middleware.rate_limit import RateLimiter
+from app.core.redis_keys import redis_key
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +58,65 @@ async def check_rate_limit(request: Request, limiter: Optional[RateLimiter] = No
     return None
 
 
+async def check_integration_rate_limit(*, identifier: str, limit_per_hour: int) -> None:
+    """Sliding-window limiter for integration key based APIs."""
+    from main import redis_client
+    from config import settings
+
+    if not redis_client or not settings.RATE_LIMIT_ENABLED:
+        return None
+
+    now = int(time.time())
+    window_start = now - 3600
+    key = redis_key("integration", "ratelimit", identifier)
+
+    await redis_client.zremrangebyscore(key, 0, window_start)
+    current = await redis_client.zcard(key)
+
+    if current >= limit_per_hour:
+        oldest_entries = await redis_client.zrange(key, 0, 0, withscores=True)
+        retry_after = 60
+        if oldest_entries:
+            oldest_ts = int(oldest_entries[0][1])
+            retry_after = max(1, 3600 - (now - oldest_ts))
+
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Integration rate limit exceeded",
+            headers={
+                "Retry-After": str(retry_after),
+                "X-RateLimit-Limit": str(limit_per_hour),
+                "X-RateLimit-Remaining": "0",
+            },
+        )
+
+    member = f"{now}:{secrets.token_hex(4)}"
+    await redis_client.zadd(key, {member: now})
+    await redis_client.expire(key, 3700)
+
+
 def _get_identifier(request: Request) -> str:
-    """Extract rate limit identifier from request"""
+    """Extract rate limit identifier from request.
+
+    Uses the authenticated user ID when available, otherwise falls back
+    to the client IP.  X-Forwarded-For is only trusted when
+    TRUSTED_PROXY_COUNT is > 0 (i.e. the app sits behind a known reverse
+    proxy).  When set, we take the Nth-from-last entry where N equals the
+    trusted proxy count, which is the first untrusted (i.e. real-client) IP.
+    """
+    from config import settings
+
     # Try to get user ID from JWT token (set by auth middleware)
     if hasattr(request.state, "user_id") and request.state.user_id:
         return f"user:{request.state.user_id}"
 
+    trusted_proxy_count: int = getattr(settings, "TRUSTED_PROXY_COUNT", 0)
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
+    if forwarded and trusted_proxy_count > 0:
+        parts = [p.strip() for p in forwarded.split(",")]
+        # Pick the entry just before the trusted proxies
+        index = max(len(parts) - trusted_proxy_count, 0)
+        ip = parts[index]
     else:
         ip = request.client.host if request.client else "unknown"
 

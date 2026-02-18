@@ -67,6 +67,10 @@ class User(Base):
     reading_history = relationship("ReadingHistory", back_populates="user", cascade="all, delete-orphan")
     feedback = relationship("UserFeedback", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")  #  Add this
+    api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
+    custom_feeds = relationship("UserCustomFeed", back_populates="user", cascade="all, delete-orphan")
+    feed_bundles = relationship("UserFeedBundle", back_populates="user", cascade="all, delete-orphan")
+    webhooks = relationship("UserWebhook", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.user_id}, username={self.username}, email={self.email})>"

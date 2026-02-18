@@ -1,0 +1,391 @@
+﻿services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      POSTGRES_DB: ${DB_NAME:-news_summarizer}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-news_summarizer}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - news-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - news-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: >
+      sh -c "alembic upgrade head &&
+      exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --proxy-headers --forwarded-allow-ips '*'"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://localhost:8000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
+
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
+
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-100}
+
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 50s
+    networks:
+      - news-network
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.celery_config:celery_app worker --loglevel=info --concurrency=2
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      - news-network
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.celery_config:celery_app beat --loglevel=info
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-news_summarizer}
+
+      REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-15}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-900}
+
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/private_key.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/public_key.pem}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8501}
+      EMAIL_DELIVERY_PROVIDER: ${EMAIL_DELIVERY_PROVIDER:-smtp}
+      EMAIL_REQUEST_TIMEOUT_SECONDS: ${EMAIL_REQUEST_TIMEOUT_SECONDS:-15}
+      EMAIL_MAX_RETRIES: ${EMAIL_MAX_RETRIES:-2}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER_USER: ${GRAPH_SENDER_USER:-}
+      GRAPH_SCOPE: ${GRAPH_SCOPE:-https://graph.microsoft.com/.default}
+      GRAPH_API_BASE_URL: ${GRAPH_API_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_AUTH_BASE_URL: ${GRAPH_AUTH_BASE_URL:-https://login.microsoftonline.com}
+      GRAPH_SAVE_TO_SENT_ITEMS: ${GRAPH_SAVE_TO_SENT_ITEMS:-true}
+      GRAPH_MSA_CLIENT_ID: ${GRAPH_MSA_CLIENT_ID:-}
+      GRAPH_MSA_AUTHORITY: ${GRAPH_MSA_AUTHORITY:-https://login.microsoftonline.com/consumers}
+      GRAPH_MSA_SCOPES: ${GRAPH_MSA_SCOPES:-https://graph.microsoft.com/Mail.Send}
+      GRAPH_MSA_TOKEN_CACHE_FILE: ${GRAPH_MSA_TOKEN_CACHE_FILE:-/app/secrets/graph_msa_token_cache.json}
+      GRAPH_MSA_AUTO_DEVICE_FLOW: ${GRAPH_MSA_AUTO_DEVICE_FLOW:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp-mail.outlook.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-News Central}
+      DEVELOPER_CONTACT_EMAIL: ${DEVELOPER_CONTACT_EMAIL:-}
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      ENABLE_NEWS_SCHEDULER: ${ENABLE_NEWS_SCHEDULER:-true}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      ENABLE_INTEGRATION_DELIVERY: ${ENABLE_INTEGRATION_DELIVERY:-false}
+      INTEGRATION_ENCRYPTION_KEY_CURRENT: ${INTEGRATION_ENCRYPTION_KEY_CURRENT:-}
+      INTEGRATION_ENCRYPTION_KEY_PREVIOUS: ${INTEGRATION_ENCRYPTION_KEY_PREVIOUS:-}
+      INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR: ${INTEGRATION_DEFAULT_RATE_LIMIT_PER_HOUR:-1000}
+      INTEGRATION_FEED_CACHE_TTL: ${INTEGRATION_FEED_CACHE_TTL:-900}
+      INTEGRATION_WEBHOOK_TIMEOUT_SECONDS: ${INTEGRATION_WEBHOOK_TIMEOUT_SECONDS:-5}
+      INTEGRATION_DELIVERY_RETENTION_DAYS: ${INTEGRATION_DELIVERY_RETENTION_DAYS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./secrets:/app/secrets
+      - ./keys:/app/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      - news-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://api:8000}
+      API_VERSION: ${FRONTEND_API_VERSION:-v1}
+      ENABLE_INTEGRATION_API: ${ENABLE_INTEGRATION_API:-false}
+      DEBUG: ${DEBUG:-false}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - news-network
+    profiles:
+      - with-nginx
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - news-network
+    profiles:
+      - with-monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - news-network
+    profiles:
+      - with-monitoring
+
+  ngrok:
+    image: ngrok/ngrok:alpine
+    restart: unless-stopped
+    command:
+      - "http"
+      - "api:8000"
+      - "--log=stdout"
+      - "--log-level=info"
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?NGROK_AUTHTOKEN must be set}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - news-network
+    ports:
+      - "127.0.0.1:4040:4040"  
+    profiles:
+      - with-ngrok
+
+networks:
+  news-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

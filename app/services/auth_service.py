@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 class AuthService:
     """Authentication service with comprehensive security features"""
+
+    @staticmethod
+    def hash_one_time_token(token: str) -> str:
+        """Hash reset/verification tokens before persisting."""
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
     async def register_user(
         self,
@@ -69,6 +75,7 @@ class AuthService:
 
         # Generate verification token
         verification_token = pwd_hasher.generate_secure_token(32)
+        verification_token_hash = self.hash_one_time_token(verification_token)
         verification_expires = datetime.now(timezone.utc) + timedelta(
             hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS
         )
@@ -81,25 +88,34 @@ class AuthService:
             full_name=user_data.full_name,
             data_processing_consent=user_data.data_processing_consent,
             consent_date=datetime.now(timezone.utc) if user_data.data_processing_consent else None,
-            verification_token=verification_token,
+            verification_token=verification_token_hash,
             verification_token_expires=verification_expires,
             is_verified=not settings.EMAIL_VERIFICATION_REQUIRED,
             last_password_change=datetime.now(timezone.utc)
         )
 
         db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
+        await db.flush()
 
-        logger.info(f"User registered: {new_user.username} ({new_user.email})")
-
-        # Send verification email if required
+        # Send verification email before commit so failed delivery doesn't leave unusable accounts.
         if settings.EMAIL_VERIFICATION_REQUIRED:
-            await email_service.send_verification_email(
+            email_sent = await email_service.send_verification_email(
                 new_user.email,
                 new_user.username,
                 verification_token
             )
+            if not email_sent:
+                await db.rollback()
+                logger.error("User registration aborted because verification email could not be sent")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Email service is unavailable. Please try again later."
+                )
+
+        await db.commit()
+        await db.refresh(new_user)
+
+        logger.info(f"User registered: {new_user.username} ({new_user.email})")
 
         return new_user, verification_token
 
@@ -108,10 +124,11 @@ class AuthService:
         token: str,
         db: AsyncSession
     ) -> User:
+        token_hash = self.hash_one_time_token(token)
         result = await db.execute(
             select(User).where(
                 and_(
-                    User.verification_token == token,
+                    User.verification_token == token_hash,
                     User.is_verified == False
                 )
             )
@@ -295,6 +312,8 @@ class AuthService:
             subject=str(user.user_id),
             session_id=str(session.session_id)
         )
+        refresh_payload = jwt_manager.decode_token(refresh_token)
+        session.refresh_token_jti = refresh_payload.get("jti")
 
         cookie_config = self._create_remember_me_cookie(refresh_token, login_data.remember_me)
 
@@ -345,6 +364,22 @@ class AuthService:
         session = result.scalar_one_or_none()
 
         if not session:
+            # Secondary lookup provides clearer diagnostics for stale/mismatched refresh tokens.
+            fallback = await db.execute(
+                select(UserSession).where(
+                    and_(
+                        UserSession.session_id == session_id,
+                        UserSession.is_active == True
+                    )
+                )
+            )
+            fallback_session = fallback.scalar_one_or_none()
+            if fallback_session:
+                logger.warning(
+                    "Refresh token rejected due to JTI mismatch for active session_id=%s user_id=%s",
+                    session_id,
+                    user_id,
+                )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session not found or revoked"
@@ -407,25 +442,30 @@ class AuthService:
         user = result.scalar_one_or_none()
 
         if user and user.is_active:
+            user_email = user.email
+            username = user.username
+
             # Generate reset token
             reset_token = pwd_hasher.generate_secure_token(32)
+            reset_token_hash = self.hash_one_time_token(reset_token)
             reset_expires = datetime.now(timezone.utc) + timedelta(
                 hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS
             )
 
-            user.reset_token = reset_token
+            user.reset_token = reset_token_hash
             user.reset_token_expires = reset_expires
 
-            await db.commit()
-
-            # Send reset email
-            await email_service.send_password_reset_email(
-                user.email,
-                user.username,
+            email_sent = await email_service.send_password_reset_email(
+                user_email,
+                username,
                 reset_token
             )
-
-            logger.info(f"Password reset requested for: {user.email}")
+            if email_sent:
+                await db.commit()
+                logger.info("Password reset requested for: %s", user_email)
+            else:
+                await db.rollback()
+                logger.error("Password reset email could not be sent for %s; reset token was not persisted", user_email)
 
         # Always return True to prevent user enumeration
         return True
@@ -507,8 +547,11 @@ class AuthService:
         new_password: str,
         db: AsyncSession
     ) -> User:
+        token_hash = self.hash_one_time_token(token)
         result = await db.execute(
-            select(User).where(User.reset_token == token)
+            select(User).where(
+                User.reset_token == token_hash
+            )
         )
         user = result.scalar_one_or_none()
 
@@ -587,7 +630,8 @@ class AuthService:
         session = UserSession(
             user_id=user.user_id,
             session_id=uuid.uuid4(),
-            refresh_token_jti=pwd_hasher.generate_secure_token(16),
+            # Set after the refresh JWT is minted so DB JTI and token JTI stay in sync.
+            refresh_token_jti=None,
             ip_address=ip_address,
             user_agent=user_agent,
             expires_at=expires_at

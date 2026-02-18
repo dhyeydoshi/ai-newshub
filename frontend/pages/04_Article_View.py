@@ -1,11 +1,13 @@
-﻿import time
+import time
 import streamlit as st
 from services.api_service import api_service
-from utils.auth import init_auth_state, require_auth
+from utils.auth import init_auth_state, require_auth, logout
+from utils.navigation import switch_page
 from utils.ui_helpers import (
     init_page_config,
     apply_custom_css,
     format_date,
+    render_contact_developer_option,
     show_error,
     show_loading,
     show_success,
@@ -13,7 +15,7 @@ from utils.ui_helpers import (
 )
 
 # Initialize
-init_page_config("Article | News Summarizer", "")
+init_page_config("Article | News Central", "")
 apply_custom_css()
 init_auth_state()
 
@@ -26,12 +28,21 @@ if "article_start_time" not in st.session_state:
 def main() -> None:
     """Article detail view"""
 
+    # Sidebar
+    with st.sidebar:
+        username = st.session_state.get("username", "User")
+        st.markdown(f"### :material/person: {username}")
+        st.divider()
+        if st.button(":material/logout: Logout", use_container_width=True):
+            logout()
+        render_contact_developer_option()
+
     article_id = st.session_state.get("selected_article")
 
     if not article_id:
         st.warning("No article selected. Please select an article from the feed.")
         if st.button("Back to Feed"):
-            st.switch_page("pages/03_News_Feed.py")
+            switch_page("news-feed")
         st.stop()
 
     if st.session_state.article_start_time is None:
@@ -43,23 +54,21 @@ def main() -> None:
     if not result["success"]:
         show_error(f"Failed to load article: {result.get('error')}")
         if st.button("Back to Feed"):
-            st.switch_page("pages/03_News_Feed.py")
+            switch_page("news-feed")
         st.stop()
 
     article = result["data"]
 
     # Header with back button
-    col1, _ = st.columns([4, 1])
-    with col1:
-        if st.button("Back to Feed"):
-            reading_time = int(time.time() - st.session_state.article_start_time)
-            api_service.submit_feedback(
-                article_id=article_id,
-                feedback_type="neutral",
-                time_spent_seconds=reading_time,
-            )
-            st.session_state.article_start_time = None
-            st.switch_page("pages/03_News_Feed.py")
+    if st.button(":material/arrow_back: Back to Feed"):
+        reading_time = int(time.time() - st.session_state.article_start_time)
+        api_service.submit_feedback(
+            article_id=article_id,
+            feedback_type="neutral",
+            time_spent_seconds=reading_time,
+        )
+        st.session_state.article_start_time = None
+        switch_page("news-feed")
 
     st.divider()
 
@@ -68,29 +77,24 @@ def main() -> None:
     # Metadata
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.caption(f"Source: {article.get('source_name', 'Unknown')}")
+        st.caption(f":material/newspaper: {article.get('source_name', 'Unknown')}")
     with col2:
-        st.caption(f"Published: {format_date(article.get('published_date', ''))}")
+        st.caption(f":material/schedule: {format_date(article.get('published_date', ''))}")
     with col3:
         if article.get("author"):
-            st.caption(f"Author: {article.get('author')}")
+            st.caption(f":material/person: {article.get('author')}")
 
     if article.get("topics"):
-        topics_html = " ".join(
-            [
-                (
-                    "<span style=\"background-color: #e3f2fd; padding: 4px 12px; "
-                    "border-radius: 12px; margin-right: 8px; font-size: 0.9em;\">"
-                    f"{topic}</span>"
-                )
-                for topic in article["topics"][:5]
-            ]
-        )
-        st.markdown(topics_html, unsafe_allow_html=True)
+        topics = article["topics"][:5]
+        col_spec = [1] * len(topics) + [max(1, 12 - len(topics))]
+        topic_cols = st.columns(col_spec, gap="small")
+        for i, topic in enumerate(topics):
+            with topic_cols[i]:
+                st.badge(topic, color="blue")
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs(["Full Article", "Summary", "Feedback"])
+    tab1, tab2 = st.tabs([":material/article: Full Article", ":material/rate_review: Feedback"])
 
     with tab1:
         if article.get("image_url"):
@@ -106,86 +110,40 @@ def main() -> None:
 
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Word Count", f"{word_count:,}")
+                st.metric(":material/text_fields: Word Count", f"{word_count:,}")
             with col2:
-                st.metric("Reading Time", f"{reading_time_min} min")
+                st.metric(":material/timer: Reading Time", f"{reading_time_min} min")
         else:
             st.info("Full content not available")
 
-        if article.get("url"):
-            st.markdown(f"[Read on {article.get('source', 'source')}]({article['url']})")
+        source_url = article.get("url") or article.get("source_url")
+        if source_url:
+            st.divider()
+            st.markdown(
+                f":link: **Source:** [{article.get('source_name', 'Original Article')}]({source_url})"
+            )
 
     with tab2:
-        st.markdown("### Summary")
-
-        existing_summary = article.get("summary")
-
-        if existing_summary:
-            st.success("Summary available!")
-            st.markdown(existing_summary)
-        else:
-            st.info("No summary available yet")
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("Generate Summary", use_container_width=True, type="primary"):
-                with show_loading("Generating summary..."):
-                    summary_result = api_service.summarize_article(
-                        article_id=article_id,
-                        summary_length="medium",
-                    )
-
-                if summary_result["success"]:
-                    summary = summary_result["data"].get("summary", "")
-                    st.session_state[f"summary_{article_id}"] = summary
-                    show_success("Summary generated successfully!")
-                    st.rerun()
-                else:
-                    show_error(f"Failed to generate summary: {summary_result.get('error')}")
-
-        if f"summary_{article_id}" in st.session_state:
-            st.divider()
-            st.markdown("#### Generated Summary")
-            st.markdown(st.session_state[f"summary_{article_id}"])
-
-    with tab3:
-        st.markdown("### Your Feedback")
+        st.markdown("### :material/rate_review: Your Feedback")
         st.caption("Help us improve your recommendations by rating this article")
 
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            if st.button("Liked It", use_container_width=True, type="primary"):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="positive",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
-
-        with col2:
-            if st.button("Neutral", use_container_width=True):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="neutral",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
-
-        with col3:
-            if st.button("Not Interested", use_container_width=True):
-                reading_time = int(time.time() - st.session_state.article_start_time)
-                result = api_service.submit_feedback(
-                    article_id=article_id,
-                    feedback_type="negative",
-                    time_spent_seconds=reading_time,
-                )
-                if result["success"]:
-                    show_toast("Thanks for your feedback!")
+        feedback_options = [
+            (":material/thumb_up: Liked It", "positive", "primary"),
+            (":material/horizontal_rule: Neutral", "neutral", "secondary"),
+            (":material/thumb_down: Not Interested", "negative", "secondary"),
+        ]
+        cols = st.columns(3)
+        for col, (label, ftype, btype) in zip(cols, feedback_options):
+            with col:
+                if st.button(label, use_container_width=True, type=btype):
+                    reading_time = int(time.time() - st.session_state.article_start_time)
+                    result = api_service.submit_feedback(
+                        article_id=article_id,
+                        feedback_type=ftype,
+                        time_spent_seconds=reading_time,
+                    )
+                    if result["success"]:
+                        show_toast("Thanks for your feedback!")
 
         st.divider()
 
@@ -204,31 +162,57 @@ def main() -> None:
 
     st.divider()
 
-    st.markdown("### Related Articles")
+    st.markdown("### :material/explore: Related Articles")
     st.caption("You might also be interested in...")
 
     if article.get("topics"):
         with show_loading("Loading related articles..."):
             result = api_service.get_latest_news(
                 page=1,
-                limit=3,
-                topics=article["topics"][:2],
+                limit=6,
+                topics=article["topics"][:3],
+                language="en",
             )
 
         if result["success"]:
-            related_articles = result["data"].get("articles", [])[:3]
+            all_articles = result["data"].get("articles", [])
+            related_articles = [
+                a for a in all_articles
+                if str(a.get("article_id", a.get("id"))) != str(article_id)
+            ][:3]
 
-            cols = st.columns(3)
-            for idx, related in enumerate(related_articles):
-                with cols[idx]:
-                    st.markdown(f"**{related.get('title', 'Untitled')[:50]}...**")
-                    st.caption(f"{related.get('source', 'Unknown')}")
-                    if st.button("Read", key=f"related_{idx}"):
-                        st.session_state.selected_article = related.get(
-                            "article_id", related.get("id")
-                        )
-                        st.session_state.article_start_time = None
-                        st.rerun()
+            if related_articles:
+                cols = st.columns(3)
+                for idx, related in enumerate(related_articles):
+                    with cols[idx]:
+                        with st.container(border=True):
+                            title = related.get("title", "Untitled")
+                            display_title = title[:80] + "..." if len(title) > 80 else title
+                            st.markdown(f"**{display_title}**")
+                            st.caption(
+                                f":material/newspaper: {related.get('source_name', 'Unknown')}  \u2022  "
+                                f":material/schedule: {format_date(related.get('published_date', ''))}"
+                            )
+                            if related.get("topics"):
+                                for topic in related["topics"][:2]:
+                                    st.badge(topic, color="blue")
+                            if st.button(
+                                ":material/menu_book: Read",
+                                key=f"related_{idx}",
+                                use_container_width=True,
+                                type="primary",
+                            ):
+                                st.session_state.selected_article = str(
+                                    related.get("article_id", related.get("id"))
+                                )
+                                st.session_state.article_start_time = None
+                                st.rerun()
+            else:
+                st.info("No related articles found.")
+        else:
+            st.info("Could not load related articles.")
+    else:
+        st.info("No topics available to find related articles.")
 
 
 if __name__ == "__main__":

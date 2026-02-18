@@ -17,6 +17,15 @@ from app.core.database import Base
 from app.models.user import User
 from app.models.article import Article
 from app.models.feedback import ReadingHistory, UserFeedback
+from app.models.integration import (
+    UserAPIKey,
+    UserCustomFeed,
+    UserFeedBundle,
+    BundleFeedMembership,
+    UserWebhook,
+    WebhookDeliveryJob,
+    WebhookDeliveryItem,
+)
 
 # this is the Alembic Config object
 config = context.config
